@@ -284,7 +284,6 @@ float g_round_end_time = 0.0;
 float g_last_respawn_time = 0.0;    // GameTime of last respawn event.
 bool g_force_respawn = true;        // When true, late-connecting players will be respawned even when realism is on. Set to true at the end of a resupply wave.
 int g_score_adder = -1;             // Ent reference to game_score used to count fire-based kills.
-int g_board_spawner_ref = -1;       // Ent reference to random_spawner that spawns board ammo.
 
 StringMap g_medical_sounds;         // Maps weapon name to DataPacks of sounds played during medical animation.
 ArrayList g_dead_national_guard;    // For backwards compatibility with any plugins using QOL's forward.
@@ -2981,24 +2980,6 @@ public void Event_ResetMap(Event event, const char[] name, bool no_broadcast)
     {
         LogError("Failed to create score adder (game_score).");
     }
-
-    // Spawner used when recollecting barricade boards.
-    int board_spawner = CreateEntityByName("random_spawner");
-    if (board_spawner != -1)
-    {
-        DispatchKeyValue(board_spawner, "ammobox_board", "100");
-        DispatchKeyValue(board_spawner, "spawnflags", "6");    // "don't spawn on map start" and "toss me about"
-        DispatchKeyValue(board_spawner, "ammo_fill_pct_max", "100");
-        DispatchKeyValue(board_spawner, "ammo_fill_pct_mix", "100");
-        if (DispatchSpawn(board_spawner))
-        {
-            g_board_spawner_ref = EntIndexToEntRef(board_spawner);
-        }
-    }
-    if (EntRefToEntIndex(g_board_spawner_ref) == INVALID_ENT_REFERENCE)
-    {
-        LogError("Failed to create board spawner (random_spawner)");
-    }
 }
 
 /**
@@ -3413,6 +3394,7 @@ public void Hook_CheckBarricade(int barricade)
     }
 }
 
+
 /**
  * Darken damaged boards. (ConVar)
  *
@@ -3472,25 +3454,35 @@ public Action Hook_BarricadeTakeDamage(
             GetEntPropFloat(inflictor, Prop_Send, "m_flLastChargeLength") > 0.0)
         {
             float idle_time = GetEntPropFloat(inflictor, Prop_Send, "m_flTimeWeaponIdle");
-            int spawner = EntRefToEntIndex(g_board_spawner_ref);
 
             // Limit of one board per swing.
             if (g_player_unbarricade_time[attacker] < idle_time &&
-                health / max_health >= recollect_health &&
-                spawner != INVALID_ENT_REFERENCE)
+                health / max_health >= recollect_health)
             {
                 g_player_unbarricade_time[attacker] = idle_time;
 
                 // Take board back.
-                float origin[3];
-                GetEntOrigin(barricade, origin);
+                int board_spawner = CreateEntityByName("random_spawner");
+                if (board_spawner != -1)
+                {
+                    DispatchKeyValue(board_spawner, "ammobox_board", "100");
+                    DispatchKeyValue(board_spawner, "spawnflags", "6");    // "don't spawn on map start" and "toss me about"
+                    DispatchKeyValue(board_spawner, "ammo_fill_pct_max", "100");
+                    DispatchKeyValue(board_spawner, "ammo_fill_pct_min", "100");
+                    if (DispatchSpawn(board_spawner))
+                    {
+                        float origin[3];
+                        GetEntOrigin(barricade, origin);
 
-                float angles[3];
-                GetEntRotation(barricade, angles);
+                        float angles[3];
+                        GetEntRotation(barricade, angles);
 
-                TeleportEntity(spawner, origin, angles, NULL_VECTOR);
-                AcceptEntityInput(spawner, "InputSpawn");
-
+                        TeleportEntity(board_spawner, origin, angles, NULL_VECTOR);
+                        AcceptEntityInput(board_spawner, "InputSpawn");
+                        // Random spawners kill themselves after spawning now, no need to delete
+                    }
+                }
+                
                 EmitSoundToAll(SOUND_BARRICADE_COLLECT, barricade);
 
                 // Notify other plugins that barricade was recollected.
@@ -3500,7 +3492,7 @@ public Action Hook_BarricadeTakeDamage(
                 Call_PushCell(barricade);
                 Call_Finish(ignored);
 
-                RemoveEdict(barricade);
+                RemoveEntity(barricade);
             }
 
             // Never take damage from charged hammer attack since players only
