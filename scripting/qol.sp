@@ -230,13 +230,11 @@ public Plugin myinfo =
     url = ""
 };
 
-enum PropVictim
+enum struct PropVictim
 {
-    PROP_VICTIM_ENT_REF,    // int
-    PROP_VICTIM_ATTACKER,   // int
-
-    PROP_VICTIM_TUPLE_SIZE
-};
+    int PROP_VICTIM_ENT_REF;    // int
+    int PROP_VICTIM_ATTACKER;   // int
+}
 
 enum ZombieTuple
 {
@@ -1688,7 +1686,7 @@ public void OnPluginStart()
     g_medical_sounds = new StringMap();
 
     // List of zombies that were hurt by exploding props.
-    g_zombie_prop_victims = new ArrayList(view_as<int>(PROP_VICTIM_TUPLE_SIZE), 0);
+    g_zombie_prop_victims = new ArrayList(sizeof(PropVictim), 0);
 
     // List of dead national guard ent refs.
     g_dead_national_guard = new ArrayList(1, 0);
@@ -3079,10 +3077,13 @@ void CreditPlayerForPropFireKill(int zombie)
         // Check our list of zombies hurt by props for player id.
         for (int i = 0; i < g_zombie_prop_victims.Length && igniter == 0; )
         {
-            int other_ref = g_zombie_prop_victims.Get(i, view_as<int>(PROP_VICTIM_ENT_REF));
+            PropVictim tuple;
+            g_zombie_prop_victims.GetArray(i, tuple, sizeof(tuple));
+
+            int other_ref = tuple.PROP_VICTIM_ENT_REF;
             if (other_ref == ent_ref)
             {
-                igniter = g_zombie_prop_victims.Get(i, view_as<int>(PROP_VICTIM_ATTACKER));
+                igniter = tuple.PROP_VICTIM_ATTACKER;
             }
 
             if (igniter != 0 || EntRefToEntIndex(other_ref) == INVALID_ENT_REFERENCE)
@@ -3332,9 +3333,9 @@ public Action Hook_ZombieTakeDamage(
 
         if (attacker != 0 && (damage_type & DMG_BLAST) && !strncmp(classname, PROP_PREFIX, sizeof(PROP_PREFIX) - 1))
         {
-            int[] tuple = new int[PROP_VICTIM_TUPLE_SIZE];
-            tuple[view_as<int>(PROP_VICTIM_ENT_REF)] = EntIndexToEntRef(victim);
-            tuple[view_as<int>(PROP_VICTIM_ATTACKER)] = attacker;
+            PropVictim tuple;
+            tuple.PROP_VICTIM_ENT_REF = EntIndexToEntRef(victim);
+            tuple.PROP_VICTIM_ATTACKER = attacker;
             g_zombie_prop_victims.PushArray(tuple);
         }
 
@@ -3751,7 +3752,7 @@ void CachePropCollisionGroup(int player_pickup, int pickup)
         else
         {
             // Add new entry.
-            int[] tuple = new int[PROP_COLLISION_TUPLE_SIZE];
+            int tuple[PROP_COLLISION_TUPLE_SIZE];
             tuple[view_as<int>(PROP_COLLISION_ENT_REF)] = pickup_ref;
             tuple[view_as<int>(PROP_COLLISION_GROUP)] = original_collision_group;
 
@@ -4862,8 +4863,8 @@ stock int GetEntPreviousSequence(int entity)
 /**
  * Retrieve an entity's origin.
  *
- * @param entity			Entity to query.
- * @param origin			Output vector.
+ * @param entity            Entity to query.
+ * @param origin            Output vector.
  */
 stock void GetEntOrigin(int entity, float origin[3])
 {
