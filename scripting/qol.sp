@@ -232,17 +232,21 @@ public Plugin myinfo =
 
 enum struct PropVictim
 {
-    int PROP_VICTIM_ENT_REF;    // int
-    int PROP_VICTIM_ATTACKER;   // int
+    int ent_ref;    // Entity hurt by prop
+    int attacker;   // Player who ignited the prop
 }
 
-enum ZombieTuple
+enum struct ZombieTuple
 {
-    ZOMBIE_ENT,
-    ZOMBIE_HOOKID,
+    int ent;
+    int hookid;
+}
 
-    ZOMBIE_TUPLE_SIZE
-};
+enum struct PropCollisionTuple
+{
+    int ent_ref;            // Ent reference
+    int collision_group;    // Original collision group
+}
 
 enum QOL_WeaponType
 {
@@ -256,14 +260,6 @@ enum MedicalAutoSwitch
     MEDICAL_AUTO_SWITCH_IF_USABLE_AND_HEAVIER = 1,  // Switch to medical item when it weighs more than current weapon and is usable by player.
     MEDICAL_AUTO_SWITCH_IF_USABLE = 2,              // Switch to medical item when it is usable by player (even if a heavier weapon exists).
     MEDICAL_AUTO_SWITCH_NEVER = 3,                  // Never consider medical weapons for auto switch.
-};
-
-enum PropCollisionTuple
-{
-    PROP_COLLISION_ENT_REF,     // int - Ent reference
-    PROP_COLLISION_GROUP,       // int - Original collision group
-
-    PROP_COLLISION_TUPLE_SIZE
 };
 
 bool g_plugin_loaded_late = false;
@@ -1700,7 +1696,7 @@ public void OnPluginStart()
     g_spawn_point_copies = new ArrayList(1, 0);     // Ent references to copies of last batch of enabled/spawned spawn points.
 
     // Stores ent refs to carried objects and their collision group pre-pickup.
-    g_carried_props = new ArrayList(view_as<int>(PROP_COLLISION_TUPLE_SIZE), 0);
+    g_carried_props = new ArrayList(sizeof(PropCollisionTuple));
 
     g_steam_ids_of_late_spawned_players = new ArrayList(1, 0);
 
@@ -3061,10 +3057,10 @@ void CreditPlayerForPropFireKill(int zombie)
             PropVictim tuple;
             g_zombie_prop_victims.GetArray(i, tuple, sizeof(tuple));
 
-            int other_ref = tuple.PROP_VICTIM_ENT_REF;
+            int other_ref = tuple.ent_ref;
             if (other_ref == ent_ref)
             {
-                igniter = tuple.PROP_VICTIM_ATTACKER;
+                igniter = tuple.attacker;
             }
 
             if (igniter != 0 || EntRefToEntIndex(other_ref) == INVALID_ENT_REFERENCE)
@@ -3315,8 +3311,8 @@ public Action Hook_ZombieTakeDamage(
         if (attacker != 0 && (damage_type & DMG_BLAST) && !strncmp(classname, PROP_PREFIX, sizeof(PROP_PREFIX) - 1))
         {
             PropVictim tuple;
-            tuple.PROP_VICTIM_ENT_REF = EntIndexToEntRef(victim);
-            tuple.PROP_VICTIM_ATTACKER = attacker;
+            tuple.ent_ref = EntIndexToEntRef(victim);
+            tuple.attacker = attacker;
             g_zombie_prop_victims.PushArray(tuple);
         }
 
@@ -3736,19 +3732,18 @@ void CachePropCollisionGroup(int player_pickup, int pickup)
         int pickup_ref = EntIndexToEntRef(pickup);
 
         // Lookup original collision group.
-        int index = g_carried_props.FindValue(pickup_ref, view_as<int>(PROP_COLLISION_ENT_REF));
+        int index = g_carried_props.FindValue(pickup_ref, PropCollisionTuple::ent_ref);
         if (index != -1)
         {
-            original_collision_group = g_carried_props.Get(index, view_as<int>(PROP_COLLISION_GROUP));
+            original_collision_group = g_carried_props.Get(index, PropCollisionTuple::collision_group);
         }
         else
         {
             // Add new entry.
-            int tuple[PROP_COLLISION_TUPLE_SIZE];
-            tuple[view_as<int>(PROP_COLLISION_ENT_REF)] = pickup_ref;
-            tuple[view_as<int>(PROP_COLLISION_GROUP)] = original_collision_group;
-
-            g_carried_props.PushArray(tuple);
+            PropCollisionTuple collision_tuple;
+            collision_tuple.ent_ref = pickup_ref;
+            collision_tuple.collision_group = original_collision_group;
+            g_carried_props.PushArray(collision_tuple);
         }
     }
 }
@@ -3799,7 +3794,7 @@ public void Hook_UnstickCarriedObject(int player_pickup)
  */
 public void OnFrame_PreventWeaponizedProp(int pickup_ref)
 {
-    int index = g_carried_props.FindValue(pickup_ref, view_as<int>(PROP_COLLISION_ENT_REF));
+    int index = g_carried_props.FindValue(pickup_ref, PropCollisionTuple::ent_ref);
     if (index != -1)
     {
         int pickup = EntRefToEntIndex(pickup_ref);
@@ -3822,15 +3817,14 @@ public void OnFrame_PreventWeaponizedProp(int pickup_ref)
  */
 public void OnFrame_RestorePropCollisionGroup(int pickup_ref)
 {
-    int index = g_carried_props.FindValue(pickup_ref, view_as<int>(PROP_COLLISION_ENT_REF));
+    int index = g_carried_props.FindValue(pickup_ref, PropCollisionTuple::ent_ref);
     if (index != -1)
     {
         int pickup = EntRefToEntIndex(pickup_ref);
-        if (pickup != INVALID_ENT_REFERENCE &&
-            g_qol_dropped_object_collision_fix.BoolValue)
+        if (pickup != INVALID_ENT_REFERENCE && g_qol_dropped_object_collision_fix.BoolValue)
         {
             // Return object to its original collision group.
-            int original_collision_group = g_carried_props.Get(index, view_as<int>(PROP_COLLISION_GROUP));
+            int original_collision_group = g_carried_props.Get(index, PropCollisionTuple::collision_group);
             SetEntCollisionGroup(pickup, original_collision_group);
         }
 
