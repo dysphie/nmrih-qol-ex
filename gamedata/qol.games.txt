@@ -1,0 +1,275 @@
+"Games"
+{
+	"nmrih"
+	{
+		"Signatures"
+		{
+			"CBaseEntity::SetCollisionGroup"
+			{
+				// void (int)
+				"library" "server"
+				"windows" "\x55\x8B\xEC\x53\x8B\x5D\x08\x56\x57\x8B\xF9**************\x8D\x4D\x08\x3B\x01**\x8B\xCF*********************\x5F\x5E\x5B\x5D\xC2\x04\x00***\x85\xD2********\x2B\xC1\x8B\xCA\x50***********\x8B\xCF*****\x5F\x5E\x5B\x5D\xC2\x04\x00"
+				"linux" "@_ZN11CBaseEntity17SetCollisionGroupEi"
+			}
+
+			"CBaseAnimating::SelectWeightedSequence"
+			{
+				// int (Activity)
+				"library" "server"
+				"windows" "\x55\x8B\xEC\x56\x8B\xF1\x57*****************************\x85\xC0**\x8B\xCE***********\x85\xC0**\x83\x38\x00**\x33\xC0\x57\xFF\x75\x08\x50*****\x83\xC4\x0C\x5F\x5E\x5D\xC2\x04\x00"
+				"linux" "@_ZN14CBaseAnimating22SelectWeightedSequenceE8Activity"
+			}
+
+			"CNMRiH_Player::Bleedout"
+			{
+				// void ()
+				"library" "server"
+				"windows" "\x55\x8B\xEC\x51\x56\x57\x8B\xF9*************\x3A\x01**\x8B\xCF***************\x85\xD2********\x2B\xC1\x8B\xCA\x50**********************\x51\x8B\xCF******************************\x5F\x5E\x8B\xE5\x5D\xC3"
+				"linux" "@_ZN13CNMRiH_Player8BleedOutEv"
+			}
+		}
+
+		"Offsets"
+		{
+			"CGameTrace::m_pEnt"
+			{
+				// CBaseEntity *
+				"windows" "76"
+				"linux" "76"
+			}
+
+			"CNMRiH_BarricadePoint::m_hPropPhysics"
+			{
+				"windows" "1148"
+				"linux" "1168"
+			}
+
+			"CNMRiH_PlayerSpawn::m_bEnabled"
+			{
+				"windows" "829"
+				"linux" "849"
+			}
+
+			"CSDKPlayer::m_iPlayerState"
+			{
+				"windows" "4792"
+				"linux" "4812"
+			}
+
+			"CBaseEntity::m_iOriginalCollisionGroup"
+			{
+				// Collision group of object before being picked up.
+				"windows" "9164"
+				"linux" "9184"
+			}
+
+			// ================================================================
+			// CGameRules
+
+			"CGameRules::GetNextBestWeapon"
+			{
+				// CBaseCombatWeapon * (CBaseCombatCharacter *,CBaseCombatWeapon *)
+				"windows" "28"
+				"linux" "29"
+			}
+
+			"CNMRiH_ObjectiveGameRules::FPlayerCanRespawn"
+			{
+				// bool (CBasePlayer *)
+				"windows" "73"
+				"linux" "74"
+			}
+
+			"CGameRules::GetPlayerSpawnSpot"
+			{
+				// CBaseEntity * (CBasePlayer *)
+				"windows" "75"
+				"linux" "76"
+			}
+
+			"CGameRules::IsSpawnPointValid"
+			{
+				// bool (CBaseEntity *, CBasePlayer *)
+				"windows" "76"
+				"linux" "77"
+			}
+
+			"CNMRiH_GameRules::AreTokensGivenFromKills"
+			{
+				// bool ()
+				"windows" "173"
+				"linux" "174"
+			}
+
+			// ================================================================
+			// CBaseEntity
+
+			"CBaseEntity::SetParent"
+			{
+				// void (CBaseEntity *, int)
+				"windows" "34"
+				"linux" "35"
+			}
+
+			"CBaseEntity::IsNPC"
+			{
+				// bool ()
+				"windows" "71"
+				"linux" "72"
+			}
+
+			"CBaseEntity::IsBaseCombatWeapon"
+			{
+				// bool ()
+				"windows" "87"
+				"linux" "88"
+			}
+
+			// ================================================================
+			// Medical Weapons
+
+			"CNMRiH_BaseMedicalItem::ApplyMedicalItem_Internal"
+			{
+				// void ()
+				"windows" "437"
+				"linux" "438"
+			}
+
+			"CNMRiH_BaseMedicalItem::ShouldUseMedicalItem"
+			{
+				"windows" "438"
+				"linux" "439"
+			}
+
+			// ================================================================
+			// Grenade
+
+			"CBaseGrenade::Detonate"
+			{
+				// void ()
+				"windows" "219"
+				"linux" "220"
+			}
+
+			"CBaseSDKGrenade::StartGrenadeThrow"
+			{
+				// void ()
+				"linux" "438"
+				"windows" "437"
+			}
+
+			"CBaseSDKGrenade::EmitGrenade"
+			{
+				//void (Vector,QAngle,Vector,Vector,CBasePlayer *,CWeaponSDKBase *)
+				"linux" "442"
+				"windows" "441"
+			}
+
+			// ================================================================
+			// Zombie
+
+			"CNMRiH_BaseZombie::m_bCrawler"
+			{
+				// bool
+				"windows" "3732"
+				"linux" "3748"
+			}
+
+			"CNMRiH_BaseZombie::m_bNationalGuard"
+			{
+				// bool
+				"windows" "3733"
+				"linux" "3749"
+			}
+
+			"CNMRiH_BaseZombie::MeleeAttack1Conditions"
+			{
+				// int (float, float)
+				"windows" "536"
+				"linux" "540"
+			}
+
+			"CNMRiH_BaseZombie::GetShoved"
+			{
+				// void (CBaseEntity *)
+				"windows" "303"
+				"linux" "304"
+			}
+
+			"CBaseCombatCharacter::NPC_TranslateActivity"
+			{
+				// Activity (Activity)
+				"windows" "259"
+				"linux" "260"
+			}
+
+			"CAI_BaseNPC::TranslateSchedule"
+			{
+				// int (int)
+				"windows" "357"
+				"linux" "358"
+			}
+
+			// ================================================================
+			// Weapons
+
+			"CBaseCombatWeapon::HasAnyAmmo"
+			{
+				// bool ()
+				"windows" "244"
+				"linux" "245"
+			}
+
+			"CBaseCombatWeapon::GetWeight"
+			{
+				// int () const
+				"windows" "318"
+				"linux" "319"
+			}
+
+			"CBaseCombatWeapon::AllowsAutoSwitchTo"
+			{
+				// bool () const
+				"windows" "319"
+				"linux" "320"
+			}
+
+			"CNMRiH_WeaponBase::HitEffects"
+			{
+				// void (CGameTrace &)
+				"windows" "406"
+				"linux" "407"
+			}
+
+			"CNMRiH_WeaponBase::ToggleIronsights"
+			{
+				// void ()
+				"windows" "408"
+				"linux" "409"
+			}
+
+			"CNMRiH_WeaponBase::DoShove"
+			{
+				// void (void)
+				"windows" "422"
+				"linux" "423"
+			}
+
+			// ================================================================
+			// Player
+
+			"CNMRiH_Player::BecomeInfected"
+			{
+				// void ()
+				"windows" "333"
+				"linux" "334"
+			}
+
+			"CBasePlayer::ForceRespawn"
+			{
+				"windows" "340"
+				"linux" "341"
+			}
+		}
+	}
+}
