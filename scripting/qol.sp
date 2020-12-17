@@ -42,7 +42,7 @@
 
 #pragma semicolon 1
 
-#define QOL_VERSION "2.0.3"
+#define QOL_VERSION "2.0.4"
 #define QOL_TAG "qol"
 #define QOL_LOG_PREFIX "[QOL]"
 
@@ -223,7 +223,7 @@ static const char MODEL_ZOMBIE_KID_GIRL[] = "models/nmr_zombie/zombiekid_girl.md
 
 public Plugin myinfo =
 {
-	name = "[NMRiH] Quality of Life",
+	name = "[NMRiH] Quality of Life (Dysphie's fork)",
 	author = "Ryan",
 	description = "Fixes bugs, adds features, improves No More Room in Hell!",
 	version = QOL_VERSION,
