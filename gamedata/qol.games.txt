@@ -38,10 +38,10 @@
 				"linux" "76"
 			}
 
-			"CNMRiH_BarricadePoint::m_hPropPhysics" // FIXME: Doesn't exist anymore. Code change needed
+			"CNMRiH_BarricadePoint::pBoard"
 			{
-				"windows" "1148"
-				"linux" "1168"
+				"windows" "1164"
+				"linux" "1184"
 			}
 
 			"CNMRiH_PlayerSpawn::m_bEnabled"
