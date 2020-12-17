@@ -324,7 +324,7 @@ DataPack g_skating_player_data[MAXPLAYERS + 1] = { null, ... };
 
 int g_offset_gametrace_ent;                     // Offset of m_pEnt in CGameTrace.
 int g_offset_is_crawler;                        // Offset of crawler boolean in zombie data.
-int g_offset_is_national_guard;                 // Offset of National Guard boolean in zombie data.
+int g_offset_is_national_guard;                 // Offset of armored zombie boolean in zombie data.
 int g_offset_barricade_point_physics_ent;       // Offset of m_hPropPhysics in CNMRiH_BarricadePoint.
 int g_offset_playerspawn_enabled;               // Offset of m_bEnabled in CNMRiH_PlayerSpawn.
 int g_offset_player_state;                      // Offset of m_iPlayerState in CSDKPlayer.
@@ -1769,7 +1769,7 @@ void LoadDHooks(Handle gameconf)
     // Ent data offsets.
     g_offset_gametrace_ent = GameConfGetOffsetOrFail(gameconf, "CGameTrace::m_pEnt");
     g_offset_is_crawler = GameConfGetOffsetOrFail(gameconf, "CNMRiH_BaseZombie::m_bCrawler");
-    g_offset_is_national_guard = GameConfGetOffsetOrFail(gameconf, "CNMRiH_BaseZombie::m_bNationalGuard");
+    g_offset_is_national_guard = GameConfGetOffsetOrFail(gameconf, "CNMRiH_BaseZombie::bHasArmor");
     g_offset_barricade_point_physics_ent = GameConfGetOffsetOrFail(gameconf, "CNMRiH_BarricadePoint::m_hPropPhysics");
     g_offset_playerspawn_enabled = GameConfGetOffsetOrFail(gameconf, "CNMRiH_PlayerSpawn::m_bEnabled");
     g_offset_player_state = GameConfGetOffsetOrFail(gameconf, "CSDKPlayer::m_iPlayerState");

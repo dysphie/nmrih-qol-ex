@@ -175,7 +175,7 @@
 				"linux" "3748"
 			}
 
-			"CNMRiH_BaseZombie::m_bNationalGuard" // FIXME: Doesn't exist anymore. Code change needed
+			"CNMRiH_BaseZombie::bHasArmor"
 			{
 				// bool
 				"windows" "3733"
