@@ -123,6 +123,8 @@
 
 #define SIZEOF_VECTOR 12
 
+#define MAXPLAYERS_NMRIH 9
+
 // Boom!
 static const char SOUNDS_EXPLODE[][] =
 {
@@ -291,28 +293,30 @@ ArrayList g_carried_props;          // List of PropCollisionTuple. Stores props 
 ArrayList g_spawn_point_copies;     // Ent references to copies of the last batch of enabled/spawned spawn points.
 ArrayList g_steam_ids_of_late_spawned_players; // Steam account IDs of all players respawned since the last respawn point
 
-bool g_player_can_late_spawn[MAXPLAYERS + 1];           // Whether player joined within spawn grace period and will respawn.
-int g_player_melee_ents_hit[MAXPLAYERS + 1];            // Number of NPCs the player's current melee trace has hit.
-bool g_player_melee_hit_world[MAXPLAYERS + 1];          // Whether a player's current melee trace has hit the world.
-float g_player_last_melee_times[MAXPLAYERS + 1];        // GameTime of player's last stamina-draining melee attack.
-float g_player_melee_previous_stamina[MAXPLAYERS + 1];  // Amount of stamina player had before melee attack.
-float g_player_melee_stamina_cost[MAXPLAYERS + 1];      // Holds the amount of stamina the player's current melee attack drains per hit.
-int g_player_last_zombie_shoved[MAXPLAYERS + 1];        // Ent reference to last zombie each player shoved.
-float g_player_spawn_times[MAXPLAYERS + 1];             // GameTime that each player spawned at.
 
-QOL_WeaponType g_player_weapon_type[MAXPLAYERS + 1];
 
-float g_player_next_bash_time[MAXPLAYERS + 1];          // Assigned a GameTime right before sighting/unsighting to players can shove during ironsight animation.
+enum struct PlayerData
+{
+	bool canLateSpawn;				// Whether player joined within spawn grace period and will respawn.
+	int meleeEntsHit;				// Number of NPCs the player's current melee trace has hit.
+	bool meleeHitWorld;				// Whether a player's current melee trace has hit the world.
+	float lastMeleeTime;			// GameTime of player's last stamina-draining melee attack.
+	float meleePreviousStamina;		// Amount of stamina player had before melee attack.
+	float meleeStaminaCost;			// Holds the amount of stamina the player's current melee attack drains per hit.	
+	int lastZombieShoved;			// Ent reference to last zombie shoved.
+	float spawnTime;				// GameTime that player spawned at
+	QOL_WeaponType weaponType;		
+	float nextBashTime;				// Assigned a GameTime right before sighting/unsighting to players can shove during ironsight animation.
+	float barricadeTime;			// Last idle time of hammer player barricaded with.
+	float unbarricadeTime;			// Last idle time of hammer player un-barricaded with.
+	bool doPickupFix;				// Used to disable pickup unsticking for one frame.
+	float pickupOrigins[3];			// Origin of players' pickup previous frame.
+	float lastSkateTime;			// GameTime of player's last skate command
+	bool skatingRespawning;			// True while the player is recovering from a skate command
+	DataPack skatingPlayerData;
+}
 
-float g_player_barricade_time[MAXPLAYERS + 1] = { 0.0, ... };   // Last idle time of hammer player barricaded with.
-float g_player_unbarricade_time[MAXPLAYERS + 1] = { 0.0, ... };   // Last idle time of hammer player un-barricaded with.
-
-bool g_player_do_pickup_fix[MAXPLAYERS + 1] = { false, ... };   // Used to disable pickup unsticking for one frame.
-float g_player_pickup_origins[MAXPLAYERS + 1][3];               // Origin of players' pickup previous frame.
-
-float g_player_last_skate_time[MAXPLAYERS + 1] = { 0.0, ... };
-bool g_skating_player_respawning[MAXPLAYERS + 1] = { false, ... };
-DataPack g_skating_player_data[MAXPLAYERS + 1] = { null, ... };
+PlayerData playerData[MAXPLAYERS_NMRIH+1];
 
 //
 // Ent-data offsets
@@ -330,29 +334,29 @@ int g_offset_original_collision_group;          // Offset of m_iOriginalCollisio
 // DHook handles
 //
 
-Handle g_dhook_next_best_weapon;                // Handle auto-switching to medical weapons.
-Handle g_dhook_allow_late_join_spawning;        // Allow late-joining players to spawn within grace period.
-Handle g_dhook_any_spawn_point_for_skater;      // Allows skating players to immediately respawn.
-Handle g_dhook_is_copied_spawn_point_clear;     // Skips nearby zombie check for copied spawn points.
+DynamicHook g_dhook_next_best_weapon;                // Handle auto-switching to medical weapons.
+DynamicHook g_dhook_allow_late_join_spawning;        // Allow late-joining players to spawn within grace period.
+DynamicHook g_dhook_any_spawn_point_for_skater;      // Allows skating players to immediately respawn.
+DynamicHook g_dhook_is_copied_spawn_point_clear;     // Skips nearby zombie check for copied spawn points.
 
-Handle g_dhook_handle_medical_autoswitch_to;    // Handle whether medical items can be auto-switched to.
-Handle g_dhook_call_medical_item_forward;       // Notify other scripts that a medical item was just used.
-Handle g_dhook_allow_any_medical_wield;         // Allows medical items to be wielded any time (but still respects consume rules).
+DynamicHook g_dhook_handle_medical_autoswitch_to;    // Handle whether medical items can be auto-switched to.
+DynamicHook g_dhook_call_medical_item_forward;       // Notify other scripts that a medical item was just used.
+DynamicHook g_dhook_allow_any_medical_wield;         // Allows medical items to be wielded any time (but still respects consume rules).
 
-Handle g_dhook_weapon_pre_sight_toggle;
-Handle g_dhook_weapon_post_sight_toggle;
+DynamicHook g_dhook_weapon_pre_sight_toggle;
+DynamicHook g_dhook_weapon_post_sight_toggle;
 
-Handle g_dhook_weapon_multishove;               // Allow players to shove many zombies at once.
+DynamicHook g_dhook_weapon_multishove;               // Allow players to shove many zombies at once.
 
-Handle g_dhook_grenade_detonate;                // Improved grenade explosions and sounds (frag and TNT).
+DynamicHook g_dhook_grenade_detonate;                // Improved grenade explosions and sounds (frag and TNT).
 
-Handle g_dhook_melee_stamina_drain;             // Prevent walls from draining stamina if at least one zombie was hit.
-Handle g_dhook_heavy_melee_stamina_drain;       // Limit heavy melee weapons to draining stamina once per swing.
+DynamicHook g_dhook_melee_stamina_drain;             // Prevent walls from draining stamina if at least one zombie was hit.
+DynamicHook g_dhook_heavy_melee_stamina_drain;       // Limit heavy melee weapons to draining stamina once per swing.
 
-Handle g_dhook_fix_kid_shove_activity;          // Reuse forward shove animation for other shove directions to prevent T-posing.
-Handle g_dhook_forbid_zombie_climb_activity;    // Disable climb animation (for crawlers and kids).
-Handle g_dhook_on_zombie_shoved;                // Store reference to last zombie each player shoved.
-Handle g_dhook_fix_zombie_item_exploit;         // Allow zombies to attack when an item is held within their hull.
+DynamicHook g_dhook_fix_kid_shove_activity;          // Reuse forward shove animation for other shove directions to prevent T-posing.
+DynamicHook g_dhook_forbid_zombie_climb_activity;    // Disable climb animation (for crawlers and kids).
+DynamicHook g_dhook_on_zombie_shoved;                // Store reference to last zombie each player shoved.
+DynamicHook g_dhook_fix_zombie_item_exploit;         // Allow zombies to attack when an item is held within their hull.
 
 
 //
@@ -767,7 +771,7 @@ public MRESReturn DHook_DoPlayerMultishove(int weapon)
 			limit = g_multishove_zombies.Length;
 		}
 
-		int last_shoved = EntRefToEntIndex(g_player_last_zombie_shoved[client]);
+		int last_shoved = EntRefToEntIndex(playerData[client].lastZombieShoved);
 		int shoved = (last_shoved != INVALID_ENT_REFERENCE) ? 1 : 0;
 
 		for (int i = 0; i < g_multishove_zombies.Length && shoved < limit; ++i)
@@ -780,7 +784,7 @@ public MRESReturn DHook_DoPlayerMultishove(int weapon)
 			}
 		}
 
-		g_player_last_zombie_shoved[client] = -1;
+		playerData[client].lastZombieShoved = -1;
 	}
 
 	return MRES_Ignored;
@@ -949,47 +953,47 @@ MRESReturn QOL_MeleeSwing(int melee_weapon, Handle params, float stamina_scale)
 		bool hit_world = ent <= MaxClients || !SDKCall(g_sdkcall_is_npc, ent);
 
 		float next_melee = GetEntPropFloat(melee_weapon, Prop_Send, "m_flNextPrimaryAttack");
-		if (next_melee > g_player_last_melee_times[client])
+		if (next_melee > playerData[client].lastMeleeTime)
 		{
 			// First hit of the swing. Stamina will always be drained.
-			g_player_melee_ents_hit[client] = hit_world ? 0 : 1;
-			g_player_melee_hit_world[client] = hit_world;
-			g_player_last_melee_times[client] = next_melee;
-			g_player_melee_previous_stamina[client] = GetClientStamina(client);
-			g_player_melee_stamina_cost[client] = -1.0; // Not yet known.
+			playerData[client].meleeEntsHit = hit_world ? 0 : 1;
+			playerData[client].meleeHitWorld = hit_world;
+			playerData[client].lastMeleeTime = next_melee;
+			playerData[client].meleePreviousStamina = GetClientStamina(client);
+			playerData[client].meleeStaminaCost = -1.0; // Not yet known.
 		}
 		else
 		{
-			if (g_player_melee_stamina_cost[client] == -1.0)
+			if (playerData[client].meleeStaminaCost == -1.0)
 			{
 				// Calculate how much stamina this swing is draining.
 				// This amount differs by weapon and charged attack duration.
-				g_player_melee_stamina_cost[client] = g_player_melee_previous_stamina[client] - GetClientStamina(client);
+				playerData[client].meleeStaminaCost = playerData[client].meleePreviousStamina - GetClientStamina(client);
 			}
 
 			// Never drain on world.
 			// If world was hit first, ignore drain on first NPC.
 			// (ConVar)
 			if (stamina_scale < 0.0 ||
-				g_qol_melee_stamina_ignore_world.BoolValue && (hit_world || (!hit_world && g_player_melee_ents_hit[client] == 0 && g_player_melee_hit_world[client])))
+				g_qol_melee_stamina_ignore_world.BoolValue && (hit_world || (!hit_world && playerData[client].meleeEntsHit == 0 && playerData[client].meleeHitWorld)))
 			{
 				stamina_scale = 0.0;
 			}
 
-			float stamina_cost = g_player_melee_stamina_cost[client];
-			float previous_stamina = g_player_melee_previous_stamina[client];
+			float stamina_cost = playerData[client].meleeStaminaCost;
+			float previous_stamina = playerData[client].meleePreviousStamina;
 			float stamina = previous_stamina - (stamina_cost * stamina_scale);
 
 			SetClientStamina(client, stamina);
-			g_player_melee_previous_stamina[client] = stamina;
+			playerData[client].meleePreviousStamina = stamina;
 
 			if (hit_world)
 			{
-				g_player_melee_hit_world[client] = true;
+				playerData[client].meleeHitWorld = true;
 			}
 			else
 			{
-				++g_player_melee_ents_hit[client];
+				++playerData[client].meleeEntsHit;
 			}
 		}
 	}
@@ -1156,7 +1160,7 @@ public MRESReturn DHook_RememberZombieShovedByPlayer(int zombie, Handle params)
 		int shover = DHookGetParam(params, 1);
 		if (shover > 0 && shover <= MaxClients)
 		{
-			g_player_last_zombie_shoved[shover] = EntIndexToEntRef(zombie);
+			playerData[shover].lastZombieShoved = EntIndexToEntRef(zombie);
 		}
 	}
 	return MRES_Ignored;
@@ -1341,7 +1345,7 @@ public MRESReturn DHook_AllowLateJoinSpawning(Handle return_handle, Handle param
 	if (!DHookGetReturn(return_handle) && !DHookIsNullParam(params, index_of_client_param))
 	{
 		int client = DHookGetParam(params, index_of_client_param);
-		if (g_player_can_late_spawn[client] && IsRoundStartedButNotEnded())
+		if (playerData[client].canLateSpawn && IsRoundStartedButNotEnded())
 		{
 			bool allow_late_spawn = true;
 
@@ -1429,7 +1433,7 @@ public MRESReturn DHook_AnySpawnPointForSkater(Handle return_handle, Handle para
 		int player = DHookGetParam(params, 2);
 
 		// Any spawn point for skating players.
-		if (g_skating_player_respawning[player])
+		if (playerData[player].skatingRespawning)
 		{
 			DHookSetReturn(return_handle, true);
 			result = MRES_Override;
@@ -2231,7 +2235,13 @@ void QOL_OnNewEntity(int entity, const char[] classname, bool spawning)
 
 	static const char NPC_PREFIX[] = "npc_nmrih_";
 
-	if (!strncmp(classname, NPC_PREFIX, sizeof(NPC_PREFIX) - 1))
+	if (IsEntityMedical(entity))
+	{
+		DHookEntity(g_dhook_call_medical_item_forward, true, entity);
+		DHookEntity(g_dhook_allow_any_medical_wield, true, entity);
+		DHookEntity(g_dhook_handle_medical_autoswitch_to, true, entity);
+	}
+	else if (!strncmp(classname, NPC_PREFIX, sizeof(NPC_PREFIX) - 1))
 	{
 		if (spawning && g_in_cutscene)
 		{
@@ -2250,7 +2260,7 @@ void QOL_OnNewEntity(int entity, const char[] classname, bool spawning)
 			{
 				if (spawning)
 				{
-					SDKHook(entity, SDKHook_SpawnPost, DHook_CheckNationalGuardCrawler);
+					SDKHook(entity, SDKHook_SpawnPost, Hook_CheckNationalGuardCrawler);
 				}
 			}
 			else if (StrEqual(classname[postfix], "kidzombie"))
@@ -2285,15 +2295,6 @@ void QOL_OnNewEntity(int entity, const char[] classname, bool spawning)
 			SDKHook(entity, SDKHook_SpawnPost, Hook_UnstickCarriedObject);
 			SDKHook(entity, SDKHook_Use, Hook_PreventWeaponizedProps);
 		}
-	}
-	else if (StrEqual(classname, ITEM_PILLS) ||
-		StrEqual(classname, ITEM_FIRST_AID) ||
-		StrEqual(classname, ITEM_BANDAGES) ||
-		StrEqual(classname, ITEM_GENE_THERAPY))
-	{
-		DHookEntity(g_dhook_call_medical_item_forward, true, entity);
-		DHookEntity(g_dhook_allow_any_medical_wield, true, entity);
-		DHookEntity(g_dhook_handle_medical_autoswitch_to, true, entity);
 	}
 	else if (!strncmp(classname, HEALTH_STATION_PREFIX, sizeof(HEALTH_STATION_PREFIX) - 1) ||
 		!strncmp(classname, SAFEZONE_SUPPLY_PREFIX, sizeof(SAFEZONE_SUPPLY_PREFIX) - 1) ||
@@ -2559,7 +2560,7 @@ public void Event_PlayerActivate(Event event, const char[] name, bool no_broadca
 	if (client != -1)
 	{
 		ResetPlayer(client);
-		g_player_can_late_spawn[client] = IsSpawnGraceActive();
+		playerData[client].canLateSpawn = IsSpawnGraceActive();
 	}
 }
 
@@ -2570,9 +2571,9 @@ public void Event_PlayerDeath(Event event, const char[] name, bool no_broadcast)
 {
 	int client = GetClientOfUserId(event.GetInt("userid"));
 
-	if (client != -1 && g_player_can_late_spawn[client])
+	if (client != -1 && playerData[client].canLateSpawn)
 	{
-		g_player_can_late_spawn[client] = IsSpawnGraceActive();
+		playerData[client].canLateSpawn = IsSpawnGraceActive();
 	}
 }
 
@@ -2608,18 +2609,18 @@ public Action Event_PrePlayerSpawn(Event event, const char[] name, bool no_broad
 
 	if (NMRiH_IsPlayerAlive(client))
 	{
-		if (g_skating_player_respawning[client])
+		if (playerData[client].skatingRespawning)
 		{
 			// Eat event and recreate player according to saved settings.
-			g_skating_player_respawning[client] = false;
+			playerData[client].skatingRespawning = false;
 			RequestFrame(OnFrame_ReEquipSkatingPlayer, userid);
 			result = Plugin_Handled;
 		}
-		else if (g_skating_player_data[client] == null)
+		else if (playerData[client].skatingPlayerData == null)
 		{
 			ResetPlayer(client);
-			g_player_spawn_times[client] = GetGameTime();
-			g_player_can_late_spawn[client] = false;
+			playerData[client].spawnTime = GetGameTime();
+			playerData[client].canLateSpawn = false;
 
 			// Add player's steam ID to recently spawned list.
 			int player_steam_id = GetSteamAccountID(client, true);
@@ -2650,7 +2651,7 @@ public void OnFrame_ReInfectPlayer(int userid)
 		return;
 	}
 
-	DataPack data = g_skating_player_data[client];
+	DataPack data = playerData[client].skatingPlayerData;
 	if (data != null)
 	{
 		data.Reset();
@@ -2665,7 +2666,7 @@ public void OnFrame_ReInfectPlayer(int userid)
 		SetEntPropFloat(client, Prop_Send, "m_flInfectionDeathTime", death_time);
 
 		delete data;
-		g_skating_player_data[client] = null;
+		playerData[client].skatingPlayerData = null;
 	}
 }
 
@@ -2683,7 +2684,7 @@ public void OnFrame_ReEquipSkatingPlayer(int userid)
 		return;
 	}
 
-	DataPack data = g_skating_player_data[client];
+	DataPack data = playerData[client].skatingPlayerData;
 	if (data != null)
 	{
 		data.Reset();
@@ -2803,7 +2804,7 @@ public void OnFrame_ReEquipSkatingPlayer(int userid)
 		if (!infected)
 		{
 			delete data;
-			g_skating_player_data[client] = null;
+			playerData[client].skatingPlayerData = null;
 		}
 	}
 }
@@ -2914,7 +2915,7 @@ void HandleRespawnEvent(bool even_in_realism = false)
 			{
 				if (IsClientInGame(i) && IsPlayerAlive(i))
 				{
-					g_player_can_late_spawn[i] = true;
+					playerData[i].canLateSpawn = true;
 				}
 			}
 		}
@@ -2939,8 +2940,8 @@ public void OnFrame_AdvanceRecentSpawners(float earliest)
 	for (int i = 1; i <= MaxClients; ++i)
 	{
 		if (NMRiH_IsPlayerAlive(i) &&
-			g_player_spawn_times[i] >= earliest &&
-			g_player_spawn_times[i] <= g_last_respawn_time)
+			playerData[i].spawnTime >= earliest &&
+			playerData[i].spawnTime <= g_last_respawn_time)
 		{
 			SDKCall(g_sdkcall_get_player_spawn_spot, i);
 		}
@@ -2985,28 +2986,28 @@ public void Event_ResetMap(Event event, const char[] name, bool no_broadcast)
 void ResetPlayer(int player)
 {
 	// Nullify skating data.
-	g_skating_player_respawning[player] = false;
-	if (g_skating_player_data[player])
+	playerData[player].skatingRespawning = false;
+	if (playerData[player].skatingPlayerData)
 	{
-		delete g_skating_player_data[player];
-		g_skating_player_data[player] = null;
+		delete playerData[player].skatingPlayerData;
+		playerData[player].skatingPlayerData = null;
 	}
 
 	// Reset skate fix cooldown.
-	g_player_last_skate_time[player] = 0.0;
+	playerData[player].lastSkateTime = 0.0;
 
 	// Clear melee stamina information.
-	g_player_melee_ents_hit[player] = 0;
-	g_player_melee_hit_world[player] = false;
-	g_player_last_melee_times[player] = 0.0;
-	g_player_melee_previous_stamina[player] = 0.0;
+	playerData[player].meleeEntsHit = 0;
+	playerData[player].meleeHitWorld = false;
+	playerData[player].lastMeleeTime = 0.0;
+	playerData[player].meleePreviousStamina = 0.0;
 
 	// No last barricade time.
-	g_player_barricade_time[player] = 0.0;
-	g_player_unbarricade_time[player] = 0.0;
+	playerData[player].barricadeTime = 0.0;
+	playerData[player].unbarricadeTime = 0.0;
 
 	// Re-enable next pickup fix.
-	g_player_do_pickup_fix[player] = true;
+	playerData[player].doPickupFix = true;
 }
 
 /**
@@ -3142,6 +3143,11 @@ public void Output_OnSpawnPointEnable(
  */
 public Action Hook_PlayerWeaponEquip(int client, int weapon)
 {
+	if (!IsValidEdict(weapon))
+	{
+		return Plugin_Continue;
+	}
+
 	char targetname[64];
 	GetEntTargetname(weapon, targetname, sizeof(targetname));
 
@@ -3195,16 +3201,16 @@ public Action Hook_PlayerWeaponSwitch(int client, int weapon)
 		char weapon_name[CLASSNAME_MAX];
 		if (IsClassnameEqual(weapon, weapon_name, sizeof(weapon_name), WEAPON_BARRICADE))
 		{
-			g_player_weapon_type[client] = WEAPON_TYPE_BARRICADE;
+			playerData[client].weaponType = WEAPON_TYPE_BARRICADE;
 		}
 		else
 		{
-			g_player_weapon_type[client] = WEAPON_TYPE_OTHER;
+			playerData[client].weaponType = WEAPON_TYPE_OTHER;
 		}
 	}
 	else if (weapon != active_weapon)
 	{
-		g_player_weapon_type[client] = WEAPON_TYPE_OTHER;
+		playerData[client].weaponType = WEAPON_TYPE_OTHER;
 	}
 
 	return Plugin_Continue;
@@ -3221,7 +3227,7 @@ public MRESReturn DHook_WeaponPreSightToggle(int weapon)
 	int player = GetEntOwner(weapon);
 	if (player != -1)
 	{
-		g_player_next_bash_time[player] = GetEntPropFloat(weapon, Prop_Send, "m_flNextBashAttack");
+		playerData[player].nextBashTime = GetEntPropFloat(weapon, Prop_Send, "m_flNextBashAttack");
 	}
 	return MRES_Ignored;
 }
@@ -3237,7 +3243,7 @@ public MRESReturn DHook_WeaponPostSightToggle(int weapon)
 	int player = GetEntOwner(weapon);
 	if (player != -1 && g_qol_ironsight_shove.BoolValue)
 	{
-		SetEntPropFloat(weapon, Prop_Send, "m_flNextBashAttack", g_player_next_bash_time[player]);
+		SetEntPropFloat(weapon, Prop_Send, "m_flNextBashAttack", playerData[player].nextBashTime);
 	}
 	return MRES_Ignored;
 }
@@ -3496,10 +3502,10 @@ public Action Hook_BarricadeTakeDamage(
 			float idle_time = GetEntPropFloat(inflictor, Prop_Send, "m_flTimeWeaponIdle");
 
 			// Limit of one board per swing.
-			if (g_player_unbarricade_time[attacker] < idle_time &&
+			if (playerData[attacker].unbarricadeTime < idle_time &&
 				health / max_health >= recollect_health)
 			{
-				g_player_unbarricade_time[attacker] = idle_time;
+				playerData[attacker].unbarricadeTime = idle_time;
 
 				// Take board back.
 				int board_spawner = CreateEntityByName("random_spawner");
@@ -3746,11 +3752,11 @@ public void OnFrame_WatchCarriedObject(int player_pickup_ref)
 				// Store object's position. If it doesn't change in one frame
 				// consider it stuck. (ConVar)
 				if (g_qol_stuck_object_fix.BoolValue &&
-					g_player_do_pickup_fix[player])
+					playerData[player].doPickupFix)
 				{
 					float pickup_origin[3];
 					GetEntOrigin(pickup, pickup_origin);
-					CopyVector(pickup_origin, g_player_pickup_origins[player]);
+					CopyVector(pickup_origin, playerData[player].pickupOrigins);
 
 					RequestFrame(OnFrame_FixStuckObject, player_pickup_ref);
 				}
@@ -3758,7 +3764,7 @@ public void OnFrame_WatchCarriedObject(int player_pickup_ref)
 				CachePropCollisionGroup(player_pickup, pickup);
 			}
 
-			g_player_do_pickup_fix[player] = true;
+			playerData[player].doPickupFix = true;
 		}
 
 	}
@@ -3811,11 +3817,11 @@ public void OnFrame_FixStuckObject(int player_pickup_ref)
 			float pickup_origin[3];
 			GetEntOrigin(pickup, pickup_origin);
 
-			if (VectorEqual(pickup_origin, g_player_pickup_origins[player]) &&
+			if (VectorEqual(pickup_origin, playerData[player].pickupOrigins) &&
 				UnstickPickup(player, pickup))
 			{
 				// Don't try to unstick same object twice.
-				g_player_do_pickup_fix[player] = false;
+				playerData[player].doPickupFix = false;
 
 				// Recreate player_pickup as previous one will fight against us and keep pickup stuck.
 				AcceptEntityInput(player_pickup, "Kill");
@@ -4088,7 +4094,7 @@ public void Hook_NewSpawnPoint(int spawn_point)
  * Setup DHooks on a new zombie and allow random chance for National Guard
  * to spawn as a crawler.
  */
-public void DHook_CheckNationalGuardCrawler(int zombie)
+public void Hook_CheckNationalGuardCrawler(int zombie)
 {
 	// Legacy QOL cvar, custom National Guard crawler health.
 	if (IsNationalGuard(zombie) && IsCrawler(zombie))
@@ -4118,12 +4124,12 @@ public Action Command_FixPlayerSkating(int client, int args)
 			use_cooldown = false;
 		}
 
-		float last = g_player_last_skate_time[client];
+		float last = playerData[client].lastSkateTime;
 		float now = GetGameTime();
 
 		if (!use_cooldown || now > last + cooldown)
 		{
-			g_player_last_skate_time[client] = now;
+			playerData[client].lastSkateTime = now;
 			FixPlayerSkating(client);
 		}
 		else
@@ -4292,8 +4298,8 @@ void FixPlayerSkating(int client)
 
 		WritePackCell(data, pickup);
 
-		g_skating_player_respawning[client] = true;
-		g_skating_player_data[client] = data;
+		playerData[client].skatingRespawning = true;
+		playerData[client].skatingPlayerData = data;
 
 		SDKCall(g_sdkcall_player_respawn, client);
 	}
@@ -4311,15 +4317,15 @@ public Action Timer_GameTimer(Handle timer)
 		if (IsClientInGame(i) && IsPlayerAlive(i))
 		{
 			// Emit barricade sounds to other players. (ConVar)
-			if (g_qol_barricade_hammer_volume.BoolValue && g_player_weapon_type[i] == WEAPON_TYPE_BARRICADE)
+			if (g_qol_barricade_hammer_volume.BoolValue && playerData[i].weaponType == WEAPON_TYPE_BARRICADE)
 			{
 				stop_hammering = HandleBarricadeHammerSounds(i);
 			}
 		}
 
-		if (stop_hammering && g_player_barricade_time[i] > 0.0)
+		if (stop_hammering && playerData[i].barricadeTime > 0.0)
 		{
-			g_player_barricade_time[i] = 0.0;
+			playerData[i].barricadeTime = 0.0;
 
 			// Stop sound for everyone. This should fix the default behaviour
 			// behaviour which keeps playing hammering sound when dead.
@@ -4343,9 +4349,9 @@ bool HandleBarricadeHammerSounds(int client)
 	if (hammer != -1 && GetEntSequence(hammer) == SEQUENCE_BARRICADE_HAMMER_BARRICADE)
 	{
 		float idle_time = GetEntPropFloat(hammer, Prop_Send, "m_flTimeWeaponIdle");
-		if (idle_time > g_player_barricade_time[client])
+		if (idle_time > playerData[client].barricadeTime)
 		{
-			g_player_barricade_time[client] = idle_time;
+			playerData[client].barricadeTime = idle_time;
 
 			// Find clients to send sound to.
 			int others[MAXPLAYERS];
@@ -4768,6 +4774,15 @@ stock int ShuffleSoundIndex(int count, int previous[SHUFFLE_SOUND_COUNT])
 	previous[0] = previous[1];
 	previous[1] = (previous[1] + 1) % count;
 	return previous[1];
+}
+
+
+/**
+ * Check if an entity is a medical item (medkit, bandages, pills or gene therapy)
+ */
+stock bool IsEntityMedical(int entity)
+{
+	return HasEntProp(entity, Prop_Send, "_applied");
 }
 
 /**
