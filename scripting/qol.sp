@@ -1748,9 +1748,9 @@ public void OnPluginStart()
 		// Hook existing players.
 		for (int i = 1; i <= MaxClients; ++i)
 		{
-			if (IsClientAuthorized(i) && IsClientInGame(i))
+			if (IsClientInGame(i))
 			{
-				OnClientPostAdminCheck(i);
+				OnClientPutInServer(i);
 			}
 		}
 	}
@@ -2177,11 +2177,12 @@ void QOL_PrecacheSoundArray(const char[][] sounds, int sound_count)
  * Setup player hooks to prevent players taking damage through walls,
  * to prevent reanimating when dying from high damage, etc.
  */
-public void OnClientPostAdminCheck(int client)
+public void OnClientPutInServer(int client)
 {
 	SDKHook(client, SDKHook_OnTakeDamage, Hook_PlayerTakeDamage);
 	SDKHook(client, SDKHook_OnTakeDamageAlive, Hook_PlayerTakeDamageAlive);
 	SDKHook(client, SDKHook_WeaponSwitch, Hook_PlayerWeaponSwitch);
+	SDKHook(client, SDKHook_WeaponSwitch, Hook_PlayerWeaponEquip);
 
 	// Forcibly call WeaponSwitch for current weapon.
 	int active_weapon = GetEntPropEnt(client, Prop_Send, "m_hActiveWeapon");
@@ -3132,6 +3133,49 @@ public void Output_OnSpawnPointEnable(
 {
 	Hook_NewSpawnPoint(caller);
 }
+
+/**
+ * Fired when a player equips a weapon.
+ *
+ * @param client        Client that equipped the weapon.
+ * @param weapon        Edict of the weapon that the player equipped.
+ */
+public Action Hook_PlayerWeaponEquip(int client, int weapon)
+{
+	char targetname[64];
+	GetEntTargetname(weapon, targetname, sizeof(targetname));
+
+	if (targetname[0])
+	{
+		DataPack data = new DataPack();
+		data.WriteCell(EntIndexToEntRef(weapon));
+		data.WriteString(targetname);
+		RequestFrame(OnFrame_RestoreWeaponTargetname, data);		
+	}
+
+	return Plugin_Continue;
+}
+
+/**
+ * Prevent weapons from losing their assigned targetname when equipped
+ * This fixes glow blips and ensures the weapon still glows when dropped
+ *
+ * @param data        DataPack housing the weapon reference and targetname
+ */
+void OnFrame_RestoreWeaponTargetname(DataPack data)
+{
+	data.Reset();
+	int weapon = EntRefToEntIndex(data.ReadCell());
+	if (weapon != -1)
+	{
+		char targetname[64];
+		data.ReadString(targetname, sizeof(targetname));
+		SetEntTargetname(weapon, targetname);
+	}
+
+	delete data;
+}
+
 
 /**
  * Cache the type of weapon equipped by each player. One string compare here
@@ -4804,6 +4848,19 @@ stock void SetEntCollisionGroup(int entity, int group)
 stock int GetEntTargetname(int entity, char[] targetname, int buffer_size)
 {
 	return GetEntPropString(entity, Prop_Data, "m_iName", targetname, buffer_size);
+}
+
+/**
+ * Set an entity's targetname (the name assigned to it in Hammer).
+ *
+ * @param entity            Entity to target.
+ * @param targetname        Targetname to set.
+ *
+ * @return                  Number of non-null bytes written.
+ */
+stock int SetEntTargetname(int entity, const char[] targetname)
+{
+	return SetEntPropString(entity, Prop_Data, "m_iName", targetname);
 }
 
 /**
