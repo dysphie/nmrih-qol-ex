@@ -707,7 +707,7 @@ public void OnFrame_ContinueMedicalSounds(DataPack data)
  */
 void EmitMedicalSound(int client, const char[] game_sound)
 {
-	int others[MAXPLAYERS];
+	int others[MAXPLAYERS_NMRIH];
 	int count = GetOtherClients(client, others);
 
 	if (count > 0)
@@ -2557,7 +2557,7 @@ public void Event_PlayerActivate(Event event, const char[] name, bool no_broadca
 {
 	int client = GetClientOfUserId(event.GetInt("userid"));
 
-	if (client != -1)
+	if (client != 0)
 	{
 		ResetPlayer(client);
 		playerData[client].canLateSpawn = IsSpawnGraceActive();
@@ -2571,7 +2571,7 @@ public void Event_PlayerDeath(Event event, const char[] name, bool no_broadcast)
 {
 	int client = GetClientOfUserId(event.GetInt("userid"));
 
-	if (client != -1 && playerData[client].canLateSpawn)
+	if (client != 0 && playerData[client].canLateSpawn)
 	{
 		playerData[client].canLateSpawn = IsSpawnGraceActive();
 	}
@@ -2607,7 +2607,7 @@ public Action Event_PrePlayerSpawn(Event event, const char[] name, bool no_broad
 	int userid = event.GetInt("userid");
 	int client = GetClientOfUserId(userid);
 
-	if (NMRiH_IsPlayerAlive(client))
+	if (client != 0 && NMRiH_IsPlayerAlive(client))
 	{
 		if (playerData[client].skatingRespawning)
 		{
@@ -2646,7 +2646,7 @@ public Action Event_PrePlayerSpawn(Event event, const char[] name, bool no_broad
 public void OnFrame_ReInfectPlayer(int userid)
 {
 	int client = GetClientOfUserId(userid);
-	if (client == -1)
+	if (client == 0)
 	{
 		return;
 	}
@@ -2679,7 +2679,7 @@ public void OnFrame_ReInfectPlayer(int userid)
 public void OnFrame_ReEquipSkatingPlayer(int userid)
 {
 	int client = GetClientOfUserId(userid);
-	if (client == -1)
+	if (client == 0)
 	{
 		return;
 	}
@@ -4354,7 +4354,7 @@ bool HandleBarricadeHammerSounds(int client)
 			playerData[client].barricadeTime = idle_time;
 
 			// Find clients to send sound to.
-			int others[MAXPLAYERS];
+			int others[MAXPLAYERS_NMRIH];
 			int count = GetOtherClients(client, others);
 
 			if (count > 0)
@@ -4511,7 +4511,7 @@ public bool Trace_PlayerMultishove(int entity, int contents_mask, ArrayList zomb
  *
  * @return The number of other clients found.
  */
-int GetOtherClients(int to_ignore, int others[MAXPLAYERS])
+int GetOtherClients(int to_ignore, int others[MAXPLAYERS_NMRIH])
 {
 	int count = 0;
 	for (int i = 0; i < MaxClients; ++i)
