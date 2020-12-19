@@ -2182,7 +2182,7 @@ public void OnClientPutInServer(int client)
 	SDKHook(client, SDKHook_OnTakeDamage, Hook_PlayerTakeDamage);
 	SDKHook(client, SDKHook_OnTakeDamageAlive, Hook_PlayerTakeDamageAlive);
 	SDKHook(client, SDKHook_WeaponSwitch, Hook_PlayerWeaponSwitch);
-	SDKHook(client, SDKHook_WeaponSwitch, Hook_PlayerWeaponEquip);
+	SDKHook(client, SDKHook_WeaponEquip, Hook_PlayerWeaponEquip);
 
 	// Forcibly call WeaponSwitch for current weapon.
 	int active_weapon = GetEntPropEnt(client, Prop_Send, "m_hActiveWeapon");
