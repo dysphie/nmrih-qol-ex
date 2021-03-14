@@ -42,7 +42,7 @@
 
 #pragma semicolon 1
 
-#define QOL_VERSION "2.0.4"
+#define QOL_VERSION "2.0.5"
 #define QOL_TAG "qol"
 #define QOL_LOG_PREFIX "[QOL]"
 
@@ -122,6 +122,11 @@
 #define IGNORE_CURRENT_WEAPON (1 << 7)
 
 #define SIZEOF_VECTOR 12
+
+// Extraction camera flags to patch out
+#define SF_CAMERA_PLAYER_POSITION 1
+#define SF_CAMERA_PLAYER_TARGET 2
+#define SF_CAMERA_BADFLAGS (SF_CAMERA_PLAYER_POSITION|SF_CAMERA_PLAYER_TARGET)
 
 #define MAXPLAYERS_NMRIH 9
 
@@ -211,6 +216,7 @@ static const char PROJECTILE_FRAG[] = "grenade_projectile";
 static const char PROJECTILE_TNT[] = "tnt_projectile";
 static const char PROJECTILE_MOLOTOV[] = "molotov_projectile";
 
+static const char EXTRACTION_CAMERA[] = "nmrih_extract_preview";
 static const char INVENTORY_BOX[] = "item_inventory_box";
 static const char SAFEZONE_SUPPLY_PREFIX[] = "nmrih_safezone_supply";
 static const char HEALTH_STATION_PREFIX[] = "nmrih_health_station";
@@ -2279,6 +2285,11 @@ void QOL_OnNewEntity(int entity, const char[] classname, bool spawning)
 			DHookEntity(g_dhook_fix_zombie_item_exploit, true, entity);
 		}
 	}
+	else if (StrEqual(classname, EXTRACTION_CAMERA))
+	{
+		// Remove legacy flags causing extraction cameras to stay at player origin
+		SDKHook(entity, SDKHook_SpawnPost, Hook_PatchExtractionCamera);
+	}
 	else if (StrEqual(classname, PROJECTILE_FRAG) || StrEqual(classname, PROJECTILE_TNT))
 	{
 		DHookEntity(g_dhook_grenade_detonate, false, entity);
@@ -2449,6 +2460,16 @@ public void Hook_ItemBoxThink(int item_box)
 	}
 }
 
+public void Hook_PatchExtractionCamera(int camera)
+{
+	int spawnflags = GetEntProp(camera, Prop_Data, "m_spawnflags");
+	if (spawnflags & SF_CAMERA_BADFLAGS)
+	{
+		spawnflags &= ~SF_CAMERA_BADFLAGS;
+		SetEntProp(camera, Prop_Data, "m_spawnflags", spawnflags);
+	}
+}
+
 /**
  * Check if entity class is something a National Guard can drop.
  */
@@ -2606,6 +2627,9 @@ public Action Event_PrePlayerSpawn(Event event, const char[] name, bool no_broad
 
 	int userid = event.GetInt("userid");
 	int client = GetClientOfUserId(userid);
+
+	// Fix clients experiencing invisible models if the round restarts during an extraction preview
+	SetClientViewEntity(client, client);
 
 	if (client != 0 && NMRiH_IsPlayerAlive(client))
 	{
