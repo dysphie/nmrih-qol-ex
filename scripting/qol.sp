@@ -1493,9 +1493,6 @@ void LoadMedicalSounds(KeyValues kv)
 
 public void OnPluginStart()
 {
-	LoadTranslations("qol.phrases");
-
-
 	// Game data is necesary for our DHooks/SDKCalls.
 	Handle gameconf = LoadGameConfigFile("qol.games");
 	if (!gameconf)
