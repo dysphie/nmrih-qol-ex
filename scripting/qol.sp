@@ -5,8 +5,6 @@
 // * Zombie swipes won't hit players standing behind them.
 // * Zombies won't grab players during extraction cutscenes.
 // * Zombies won't grab players in situations where the player can't shove back.
-// * Kid zombies don't T-pose when climbing.
-// * Bandages, pills, and first aid are always equippable to allow throwing. (They remain unusable if they would have no effect.)
 // * Arrows can be retrieved from props. (Previous behaviour caused desync between arrow model and arrow entity.)
 // * Arrows follow attached objects faithfully. (Previous behaviour only tracked rotation and didn't handle brush entities.)
 // * Grenade throwing sounds.
@@ -23,14 +21,9 @@
 // * Barricade hammer sounds are emitted to other players.
 // * Barricade boards can be recollected with barricade hammer's charged attack.
 // * Medical items play sounds for other players to hear.
-// * Fix for exploit where physics objects can be used as weapons.
-// * Fix for exploit where physics objects can be used to disable zombies.
-// * Fix for bug where physics objects lose their original collision properties after being carried by multiple people.
-// * Fix players taking damage from touching func_breakables (glass roof on Brooklyn, vent on Fema, etc).
 // * Allow players to shove during ironsight raise/lower animation.
 // * Allow players' shove to hit multiple zombies.
 // * Allow late-joining players to spawn during a customizable grace period.
-// * Client command to fix ice-skating movement.
 // * Exposes forwards for other Sourcemod scripts.
 //
 
@@ -41,8 +34,9 @@
 #include <dhooks>
 
 #pragma semicolon 1
+#pragma newdecls required
 
-#define QOL_VERSION "2.0.5"
+#define QOL_VERSION "2.1.5"
 #define QOL_TAG "qol"
 #define QOL_LOG_PREFIX "[QOL]"
 
@@ -84,14 +78,7 @@
 // Collision groups.
 #define COLLISION_GROUP_NONE 0
 #define COLLISION_GROUP_DEBRIS 1
-#define COLLISION_GROUP_CARRIED_OBJECT 34
 #define COLLISION_GROUP_INVENTORY_BOX 34
-#define COLLISION_GROUP_HEALTH_STATION 36
-#define COLLISION_GROUP_SAFEZONE_SUPPLY 37
-
-// AI conditions.
-#define COND_CAN_MELEE_ATTACK1 23
-#define COND_TOO_FAR_TO_ATTACK 39
 
 #define STATE_ACTIVE 0  // Player state code used by living players.
 
@@ -113,20 +100,12 @@
 
 // Symbolic names for GetVectorDistance.
 #define SQUARED_DISTANCE true
-#define UNSQUARED_DISTANCE false
 
 // Symbolic names for KeyValues traversal.
 #define KEYS_ONLY true
 #define KEYS_AND_VALUES false
 
 #define IGNORE_CURRENT_WEAPON (1 << 7)
-
-#define SIZEOF_VECTOR 12
-
-// Extraction camera flags to patch out
-#define SF_CAMERA_PLAYER_POSITION 1
-#define SF_CAMERA_PLAYER_TARGET 2
-#define SF_CAMERA_BADFLAGS (SF_CAMERA_PLAYER_POSITION|SF_CAMERA_PLAYER_TARGET)
 
 #define MAXPLAYERS_NMRIH 9
 
@@ -216,15 +195,10 @@ static const char PROJECTILE_FRAG[] = "grenade_projectile";
 static const char PROJECTILE_TNT[] = "tnt_projectile";
 static const char PROJECTILE_MOLOTOV[] = "molotov_projectile";
 
-static const char EXTRACTION_CAMERA[] = "nmrih_extract_preview";
 static const char INVENTORY_BOX[] = "item_inventory_box";
-static const char SAFEZONE_SUPPLY_PREFIX[] = "nmrih_safezone_supply";
-static const char HEALTH_STATION_PREFIX[] = "nmrih_health_station";
 
 static const char PLAYER_PICKUP[] = "player_pickup";
 static const char PLAYER_SPAWN_POINT[] = "info_player_nmrih";
-
-static const char PROP_NAME_PLAYER_AMMO[] = "m_iAmmo";
 
 static const char MODEL_ZOMBIE_KID_BOY[] = "models/nmr_zombie/zombiekid_boy.mdl";
 static const char MODEL_ZOMBIE_KID_GIRL[] = "models/nmr_zombie/zombiekid_girl.mdl";
@@ -295,7 +269,6 @@ ArrayList g_zombie_prop_victims;    // Zombies hurt by explosive props: tuples o
 ArrayList g_arrow_projectiles;      // References to live arrow projectiles.
 ArrayList g_spawning_ammo_boxes;    // References to ammo boxes currently being spawned.
 ArrayList g_multishove_zombies;     // Stores ent indices of zombies hit by potential multishove.
-ArrayList g_carried_props;          // List of PropCollisionTuple. Stores props and their collision group before pickup.
 ArrayList g_spawn_point_copies;     // Ent references to copies of the last batch of enabled/spawned spawn points.
 ArrayList g_steam_ids_of_late_spawned_players; // Steam account IDs of all players respawned since the last respawn point
 
@@ -317,9 +290,6 @@ enum struct PlayerData
 	float unbarricadeTime;			// Last idle time of hammer player un-barricaded with.
 	bool doPickupFix;				// Used to disable pickup unsticking for one frame.
 	float pickupOrigins[3];			// Origin of players' pickup previous frame.
-	float lastSkateTime;			// GameTime of player's last skate command
-	bool skatingRespawning;			// True while the player is recovering from a skate command
-	DataPack skatingPlayerData;
 }
 
 PlayerData playerData[MAXPLAYERS_NMRIH+1];
@@ -333,8 +303,6 @@ int g_offset_is_crawler;                        // Offset of crawler boolean in 
 int g_offset_is_national_guard;                 // Offset of armored zombie boolean in zombie data.
 int g_offset_barricade_point_physics_ent;       // Offset of pBoard in CNMRiH_BarricadePoint.
 int g_offset_playerspawn_enabled;               // Offset of m_bEnabled in CNMRiH_PlayerSpawn.
-int g_offset_player_state;                      // Offset of m_iPlayerState in CSDKPlayer.
-int g_offset_original_collision_group;          // Offset of m_iOriginalCollisionGroup in CBaseEntity.
 
 //
 // DHook handles
@@ -342,7 +310,6 @@ int g_offset_original_collision_group;          // Offset of m_iOriginalCollisio
 
 DynamicHook g_dhook_next_best_weapon;                // Handle auto-switching to medical weapons.
 DynamicHook g_dhook_allow_late_join_spawning;        // Allow late-joining players to spawn within grace period.
-DynamicHook g_dhook_any_spawn_point_for_skater;      // Allows skating players to immediately respawn.
 DynamicHook g_dhook_is_copied_spawn_point_clear;     // Skips nearby zombie check for copied spawn points.
 
 DynamicHook g_dhook_handle_medical_autoswitch_to;    // Handle whether medical items can be auto-switched to.
@@ -359,25 +326,16 @@ DynamicHook g_dhook_grenade_detonate;                // Improved grenade explosi
 DynamicHook g_dhook_melee_stamina_drain;             // Prevent walls from draining stamina if at least one zombie was hit.
 DynamicHook g_dhook_heavy_melee_stamina_drain;       // Limit heavy melee weapons to draining stamina once per swing.
 
-DynamicHook g_dhook_fix_kid_shove_activity;          // Reuse forward shove animation for other shove directions to prevent T-posing.
 DynamicHook g_dhook_forbid_zombie_climb_activity;    // Disable climb animation (for crawlers and kids).
 DynamicHook g_dhook_on_zombie_shoved;                // Store reference to last zombie each player shoved.
-DynamicHook g_dhook_fix_zombie_item_exploit;         // Allow zombies to attack when an item is held within their hull.
-
 
 //
 // SDK call handles
 //
 
-Handle g_sdkcall_select_weighted_sequence;      // Used to check if an activity exists.
 Handle g_sdkcall_weapon_has_ammo;               // Returns true if a weapon has ammo or doesn't need ammo.
 Handle g_sdkcall_get_item_weight;               // Get an item's weight (this is the item's inventory weight and auto-switch priority).
-Handle g_sdkcall_player_bleedout;               // Makes a player bleedout. void CNMRiH_Player::Bleedout(void)
-Handle g_sdkcall_player_become_infected;        // Makes a player infected. void CNMRiH_Player::BecomeInfected(void)
-Handle g_sdkcall_player_respawn;                // Causes a player to respawn. Could be replaced with Sourcemod native DispatchSpawn().
 Handle g_sdkcall_set_entity_collision_group;    // Change an entity's collision group.
-Handle g_sdkcall_is_npc;                        // Check if a CBaseEntity is an NPC.
-Handle g_sdkcall_is_combat_weapon;              // Check if a CBaseEntity is an item.
 Handle g_sdkcall_set_parent;                    // Setup an entity to have a parent. void CBaseEntity::SetParent(CBaseEntity *, int)
 Handle g_sdkcall_are_tokens_given_from_kills;   // Check whether game mode is using tokens.
 Handle g_sdkcall_get_player_spawn_spot;         // Move player to an available spawn spot.
@@ -395,13 +353,11 @@ ConVar g_qol_round_start_spawn_grace;           // Number of seconds after round
 ConVar g_qol_respawn_grace;                     // Number of seconds after a respawn that connecting players will still be allowed to spawn.
 ConVar g_qol_respawn_ahead_threshold;           // Players that spawn this many seconds before a respawn event will be teleported to the newer respawn points.
 ConVar g_qol_prevent_late_spawn_abuse;          // When non-zero, late spawned players are added to a list. The players on that list will not be late-spawned if they reconnect. The list is cleared at each respawn event.
-ConVar g_qol_skate_cooldown;                    // Time in seconds between de-skate commands.
 ConVar g_qol_barricade_damage_volume;           // Controls volume of new barricade damage sounds.
 ConVar g_qol_barricade_hammer_volume;           // Controls volume of barricade sounds heard by non-barricading players.
 ConVar g_qol_barricade_retrieve_health;         // Minimum percent of health a barricade can and still be recollected with the barricade hammer.
 ConVar g_qol_barricade_show_damage;             // Darken boards according to their damage amount.
 ConVar g_qol_barricade_zombie_multihit_ignore;  // Percent of damage barricades should ignore when they're hit by a zombie that isn't targetting that particular barricade.
-ConVar g_qol_func_breakable_player_damage_fix;  // Prevent func breakables from hurting players when they touch.
 ConVar g_qol_infection_bypass;                  // Amount of damage an infected player must take in one pass to skip reanimating.
 ConVar g_qol_count_fire_kills;                  // Award player score for killing zombies by fire.
 ConVar g_qol_count_infected_suicide_kill;       // Award score to players that suicide while infected.
@@ -409,7 +365,6 @@ ConVar g_qol_stuck_object_fix;                  // Allow players to pickup stuck
 ConVar g_qol_weaponized_object_fix;             // Prevent exploit that allows carried physics props to damage players and zombies.
 ConVar g_qol_dropped_object_collision_fix;      // Maintain an object's original collision properties even if multiple players try to pick it up.
 ConVar g_qol_nonsolid_supply;                   // Legacy option that makes all supply boxes debris so players can walk through them.
-ConVar g_qol_zombie_prop_exploit_fix;           // Fix exploit where zombies don't attack when an item is held inside of their body.
 ConVar g_qol_zombie_prevent_attack_backwards;   // Prevent zombies' swipes damaging players behind them.
 ConVar g_qol_zombie_prevent_attack_thru_walls;  // Prevent zombies biting or hurting players thru objects like fences and doors.
 ConVar g_qol_zombie_prevent_grab_during_cutscene; // Prevent zombies grabbing players during cutscenes.
@@ -430,7 +385,6 @@ ConVar g_qol_multishove_max_pushed;             // Maximum number of zombies to 
 ConVar g_qol_sks_bayonet_sounds;                // Play extra headstab sound on bayonet stab.
 ConVar g_qol_medical_auto_switch_style;         // How to handle auto-switching to medical items.
 ConVar g_qol_medical_volume;                    // Volume of medical sounds as heard by other players.
-ConVar g_qol_medical_wield;                     // Whether to allow any medical item to be equipped.
 
 // NMRiH convars.
 ConVar g_sv_tags;
@@ -545,32 +499,21 @@ public MRESReturn DHook_CallMedicalItemForward(int medicine, Handle return_handl
 }
 
 /**
- * Allow medical items to be equipped any time. (ConVar)
+ * Begin audible healing. (ConVar)
  *
  * Native signature:
  * bool CNMRiH_BaseMedicalItem::ShouldUseMedicalItem(void) const
  */
 public MRESReturn DHook_OnAttemptMedicalUse(int medicine, Handle return_handle)
 {
-	MRESReturn result = MRES_Ignored;
-
-	int owner = GetEntOwner(medicine);
-
-	// Allow any medical item to be equipped.
-	if (medicine != GetClientActiveWeapon(owner))
+	if (DHookGetReturn(return_handle))
 	{
-		if (g_qol_medical_wield.BoolValue)
-		{
-			DHookSetReturn(return_handle, 1);
-			result = MRES_Override;
-		}
-	}
-	else if (DHookGetReturn(return_handle))
-	{
-		StartMedicalSounds(owner, medicine);
+		int owner = GetEntOwner(medicine);
+		if (owner != -1)
+			StartMedicalSounds(owner, medicine);
 	}
 
-	return result;
+	return MRES_Ignored;
 }
 
 /**
@@ -956,7 +899,7 @@ MRESReturn QOL_MeleeSwing(int melee_weapon, Handle params, float stamina_scale)
 		{
 			ent = DHookGetParamObjectPtrVar(params, 1, g_offset_gametrace_ent, ObjectValueType_CBaseEntityPtr);
 		}
-		bool hit_world = ent <= MaxClients || !SDKCall(g_sdkcall_is_npc, ent);
+		bool hit_world = ent <= MaxClients || !IsEntityNPC(ent);
 
 		float next_melee = GetEntPropFloat(melee_weapon, Prop_Send, "m_flNextPrimaryAttack");
 		if (next_melee > playerData[client].lastMeleeTime)
@@ -1074,66 +1017,6 @@ public MRESReturn DHook_PreventMultigrab(int this_ent, Handle return_handle, Han
 }
 
 /**
- * Check if zombie kid is using standard model.
- *
- * This should hopefully fixe an issue with custom zombie dogs not moving.
- *
- * @param kid   Zombie kid to check.
- *
- * @return      True if the kid is using a standard model, otherwise false.
- */
-bool IsStandardKidModel(int kid)
-{
-	int model_index = GetEntProp(kid, Prop_Data, "m_nModelIndex");
-	return model_index == g_model_zombie_kid_boy || model_index == g_model_zombie_kid_girl;
-}
-
-/**
- * Check if an NPC activity exists. Used to repair T-pose in kid zombies.
- *
- * It looks like some activity IDs are assigned dynamically and differ
- * between linux and windows servers. This allows us to check for missing
- * activities in a platform agnostic way.
- */
-bool IsValidActivity(int npc, int activity)
-{
-	return SDKCall(g_sdkcall_select_weighted_sequence, npc, activity) != -1;
-}
-
-/**
- * Prevent kids T-posing. (ConVar)
- *
- * Kids T-pose when shoved from side or back and when bashing barricades.
- *
- * Native signature:
- * Activity CBaseCombatCharacter::NPC_TranslateActivity(Activity)
- */
-public MRESReturn DHook_FixKidTPoseActivities(int kid, Handle return_handle, Handle params)
-{
-	MRESReturn result = MRES_Ignored;
-
-	if (g_qol_kid_prevent_tpose.BoolValue && IsStandardKidModel(kid))
-	{
-		int act = DHookGetReturn(return_handle);
-		if (act == ACT_SHOVE_LEFT || act == ACT_SHOVE_RIGHT || act == ACT_SHOVE_BEHIND)
-		{
-			// There's no sideways shove or behind shove animations so just
-			// reuse front shove.
-			DHookSetReturn(return_handle, ACT_SHOVE);
-			result = MRES_Override;
-		}
-		else if (!IsValidActivity(kid, act))
-		{
-			// No animations for bash/item swat, just use normal attack animation.
-			DHookSetReturn(return_handle, ACT_MELEE_ATTACK1);
-			result = MRES_Override;
-		}
-	}
-
-	return result;
-}
-
-/**
  * Prevent kids from T-posing when climbing.
  *
  * Native signature:
@@ -1170,33 +1053,6 @@ public MRESReturn DHook_RememberZombieShovedByPlayer(int zombie, Handle params)
 		}
 	}
 	return MRES_Ignored;
-}
-
-/**
- * Allow zombies to attack through items that are held within their hull. (ConVar)
- *
- * Native signature:
- * int CNMRiH_BaseZombie::MeleeAttack1Conditions(float, float)
- */
-public MRESReturn DHook_FixZombieItemExploit(int zombie, Handle return_handle, Handle params)
-{
-	MRESReturn result = MRES_Ignored;
-
-	int ret = DHookGetReturn(return_handle);
-
-	int enemy = GetEntPropEnt(zombie, Prop_Data, "m_hEnemy");
-	float attack_range = g_sv_zombie_reach.FloatValue;
-
-	if (ret == COND_TOO_FAR_TO_ATTACK &&
-		g_qol_zombie_prop_exploit_fix.BoolValue &&
-		enemy != -1 &&
-		GetEntDistance(zombie, enemy) < attack_range)
-	{
-		DHookSetReturn(return_handle, COND_CAN_MELEE_ATTACK1);
-		result = MRES_Override;
-	}
-
-	return result;
 }
 
 /**
@@ -1423,33 +1279,6 @@ bool IsSpawnGraceActive()
 }
 
 /**
- * Treat any spawn point as valid when respawning a skating player.
- *
- * This prevents spawn points from being unavailable due to nearby zombies.
- *
- * Native signature:
- * bool CGameRules::IsSpawnPointValid(CBaseEntity *, CBasePlayer *)
- */
-public MRESReturn DHook_AnySpawnPointForSkater(Handle return_handle, Handle params)
-{
-	MRESReturn result = MRES_Ignored;
-
-	if (!DHookIsNullParam(params, 2))
-	{
-		int player = DHookGetParam(params, 2);
-
-		// Any spawn point for skating players.
-		if (playerData[player].skatingRespawning)
-		{
-			DHookSetReturn(return_handle, true);
-			result = MRES_Override;
-		}
-	}
-
-	return result;
-}
-
-/**
  * Allow players to spawn at copied spawn points so long as its immediate
  * space is clear (we ignore nearby zombies).
  *
@@ -1554,16 +1383,7 @@ public void ConVar_OnNonSolidSupplyChange(ConVar convar, const char[] old, const
 
 			int collision_group = -1;
 
-			// Check if entity is a supply object that we can fix.
-			if (!strncmp(classname, HEALTH_STATION_PREFIX, sizeof(HEALTH_STATION_PREFIX) - 1))
-			{
-				collision_group = on ? COLLISION_GROUP_DEBRIS : COLLISION_GROUP_HEALTH_STATION;
-			}
-			else if (!strncmp(classname, SAFEZONE_SUPPLY_PREFIX, sizeof(SAFEZONE_SUPPLY_PREFIX) - 1))
-			{
-				collision_group = on ? COLLISION_GROUP_DEBRIS : COLLISION_GROUP_SAFEZONE_SUPPLY;
-			}
-			else if (StrEqual(classname, INVENTORY_BOX))
+			if (StrEqual(classname, INVENTORY_BOX))
 			{
 				if (on)
 				{
@@ -1705,9 +1525,6 @@ public void OnPluginStart()
 	g_multishove_zombies = new ArrayList(1, 0);     // Ent indices to zombies caught by multishove trace.
 	g_spawn_point_copies = new ArrayList(1, 0);     // Ent references to copies of last batch of enabled/spawned spawn points.
 
-	// Stores ent refs to carried objects and their collision group pre-pickup.
-	g_carried_props = new ArrayList(sizeof(PropCollisionTuple));
-
 	g_steam_ids_of_late_spawned_players = new ArrayList(1, 0);
 
 	LoadConfig();
@@ -1721,9 +1538,6 @@ public void OnPluginStart()
 	g_sv_zombie_reach = FindConVar("sv_zombie_reach");
 	g_sv_barricade_health = FindConVar("sv_barricade_health");
 	g_cl_barricade_board_model = FindConVar("cl_barricade_board_model");
-
-	RegAdminCmd("sm_skaterboy", Command_FixPlayerSkating, 0, "Fix ice-skating/jittery player movement");
-	RegAdminCmd("sm_skatergirl", Command_FixPlayerSkating, 0, "Fix ice-skating/jittery player movement");
 
 	HookEvent("new_wave", Event_NewWave);
 	HookEvent("nmrih_reset_map", Event_ResetMap);
@@ -1778,8 +1592,6 @@ void LoadDHooks(Handle gameconf)
 	g_offset_is_national_guard = GameConfGetOffsetOrFail(gameconf, "CNMRiH_BaseZombie::bHasArmor");
 	g_offset_barricade_point_physics_ent = GameConfGetOffsetOrFail(gameconf, "CNMRiH_BarricadePoint::pBoard");
 	g_offset_playerspawn_enabled = GameConfGetOffsetOrFail(gameconf, "CNMRiH_PlayerSpawn::m_bEnabled");
-	g_offset_player_state = GameConfGetOffsetOrFail(gameconf, "CSDKPlayer::m_iPlayerState");
-	g_offset_original_collision_group = GameConfGetOffsetOrFail(gameconf, "CBaseEntity::m_iOriginalCollisionGroup");
 
 	int offset;
 
@@ -1793,12 +1605,6 @@ void LoadDHooks(Handle gameconf)
 	offset = GameConfGetOffsetOrFail(gameconf, "CNMRiH_ObjectiveGameRules::FPlayerCanRespawn");
 	g_dhook_allow_late_join_spawning = DHookCreate(offset, HookType_GameRules, ReturnType_Bool, ThisPointer_Ignore, DHook_AllowLateJoinSpawning);
 	DHookAddParam(g_dhook_allow_late_join_spawning, HookParamType_CBaseEntity);   // CBaseEntity *, player
-
-	// Hook to allow skating players to spawn anywhere.
-	offset = GameConfGetOffsetOrFail(gameconf, "CGameRules::IsSpawnPointValid");
-	g_dhook_any_spawn_point_for_skater = DHookCreate(offset, HookType_GameRules, ReturnType_Bool, ThisPointer_Ignore, DHook_AnySpawnPointForSkater);
-	DHookAddParam(g_dhook_any_spawn_point_for_skater, HookParamType_CBaseEntity);   // CBaseEntity *, spot
-	DHookAddParam(g_dhook_any_spawn_point_for_skater, HookParamType_CBaseEntity);   // CBasePlayer *, player
 
 	// Skip nearby zombie check when spawning players at copied spawn points.
 	g_dhook_is_copied_spawn_point_clear = DHookCreate(offset, HookType_GameRules, ReturnType_Bool, ThisPointer_Ignore, DHook_IsCopiedSpawnPointClear);
@@ -1844,20 +1650,10 @@ void LoadDHooks(Handle gameconf)
 	g_dhook_forbid_zombie_climb_activity = DHookCreate(offset, HookType_Entity, ReturnType_Int, ThisPointer_CBaseEntity, DHook_ForbidZombieClimbActivity);
 	DHookAddParam(g_dhook_forbid_zombie_climb_activity, HookParamType_Int);     // activity
 
-	// Prevent kid T-posing when shoved from back or side.
-	g_dhook_fix_kid_shove_activity = DHookCreate(offset, HookType_Entity, ReturnType_Int, ThisPointer_CBaseEntity, DHook_FixKidTPoseActivities);
-	DHookAddParam(g_dhook_fix_kid_shove_activity, HookParamType_Int);   // activity
-
 	// Cache an ent reference to the last zombie a player shoved.
 	offset = GameConfGetOffsetOrFail(gameconf, "CNMRiH_BaseZombie::GetShoved");
 	g_dhook_on_zombie_shoved = DHookCreate(offset, HookType_Entity, ReturnType_Void, ThisPointer_CBaseEntity, DHook_RememberZombieShovedByPlayer);
 	DHookAddParam(g_dhook_on_zombie_shoved, HookParamType_CBaseEntity); // shover
-
-	// Allow zombies to attack when an item is held within their hull.
-	offset = GameConfGetOffsetOrFail(gameconf, "CNMRiH_BaseZombie::MeleeAttack1Conditions");
-	g_dhook_fix_zombie_item_exploit = DHookCreate(offset, HookType_Entity, ReturnType_Int, ThisPointer_CBaseEntity, DHook_FixZombieItemExploit);
-	DHookAddParam(g_dhook_fix_zombie_item_exploit, HookParamType_Float);
-	DHookAddParam(g_dhook_fix_zombie_item_exploit, HookParamType_Float);
 }
 
 void LoadSDKCalls(Handle gameconf)
@@ -1870,13 +1666,6 @@ void LoadSDKCalls(Handle gameconf)
 	PrepSDKCall_SetVirtual(offset);
 	PrepSDKCall_AddParameter(SDKType_CBaseEntity, SDKPass_Pointer);
 	g_sdkcall_shove_zombie = EndPrepSDKCall();
-
-	// Used to check if an activity exists.
-	StartPrepSDKCall(SDKCall_Entity);
-	GameConfPrepSDKCallSignatureOrFail(gameconf, "CBaseAnimating::SelectWeightedSequence");
-	PrepSDKCall_AddParameter(SDKType_PlainOldData, SDKPass_Plain);  // Activity
-	PrepSDKCall_SetReturnInfo(SDKType_PlainOldData, SDKPass_Plain);
-	g_sdkcall_select_weighted_sequence = EndPrepSDKCall();
 
 	// Check if a weapon has ammo or doesn't need ammo.
 	offset = GameConfGetOffsetOrFail(gameconf, "CBaseCombatWeapon::HasAnyAmmo");
@@ -1892,42 +1681,11 @@ void LoadSDKCalls(Handle gameconf)
 	PrepSDKCall_SetReturnInfo(SDKType_PlainOldData, SDKPass_Plain);
 	g_sdkcall_get_item_weight = EndPrepSDKCall();
 
-	// Start player bleeding out.
-	StartPrepSDKCall(SDKCall_Player);
-	GameConfPrepSDKCallSignatureOrFail(gameconf, "CNMRiH_Player::Bleedout");
-	g_sdkcall_player_bleedout = EndPrepSDKCall();
-
-	// Infect player.
-	offset = GameConfGetOffsetOrFail(gameconf, "CNMRiH_Player::BecomeInfected");
-	StartPrepSDKCall(SDKCall_Player);
-	PrepSDKCall_SetVirtual(offset);
-	g_sdkcall_player_become_infected = EndPrepSDKCall();
-
-	// Cause a player to attempt respawn.
-	offset = GameConfGetOffsetOrFail(gameconf, "CBasePlayer::ForceRespawn");
-	StartPrepSDKCall(SDKCall_Player);
-	PrepSDKCall_SetVirtual(offset);
-	g_sdkcall_player_respawn = EndPrepSDKCall();
-
 	// Change entity's collision group.
 	StartPrepSDKCall(SDKCall_Entity);
 	GameConfPrepSDKCallSignatureOrFail(gameconf, "CBaseEntity::SetCollisionGroup");
 	PrepSDKCall_AddParameter(SDKType_PlainOldData, SDKPass_Plain);  // int, collision group
 	g_sdkcall_set_entity_collision_group = EndPrepSDKCall();
-
-	// Check if entity is NPC.
-	offset = GameConfGetOffsetOrFail(gameconf, "CBaseEntity::IsNPC");
-	StartPrepSDKCall(SDKCall_Entity);
-	PrepSDKCall_SetVirtual(offset);
-	PrepSDKCall_SetReturnInfo(SDKType_Bool, SDKPass_Plain);
-	g_sdkcall_is_npc = EndPrepSDKCall();
-
-	// Check if entity is item.
-	offset = GameConfGetOffsetOrFail(gameconf, "CBaseEntity::IsBaseCombatWeapon");
-	StartPrepSDKCall(SDKCall_Entity);
-	PrepSDKCall_SetVirtual(offset);
-	PrepSDKCall_SetReturnInfo(SDKType_Bool, SDKPass_Plain);
-	g_sdkcall_is_combat_weapon = EndPrepSDKCall();
 
 	// Used to parent arrows to objects they hit.
 	offset = GameConfGetOffsetOrFail(gameconf, "CBaseEntity::SetParent");
@@ -1961,11 +1719,6 @@ void CreateConVars()
 	//
 	// Player
 	//
-	g_qol_skate_cooldown = CreateConVar("qol_skate_cooldown", "10",
-		"Number of seconds player must wait between /skaterboy commands. Negative value to disable command.");
-
-	g_qol_func_breakable_player_damage_fix = CreateConVar("qol_func_breakable_player_damage_fix", "1",
-		"Prevent players taking damage from touching func_breakables (glass roof on Brooklyn, vent on FEMA, etc).");
 
 	g_qol_infection_bypass = CreateConVar("qol_infection_bypass", "100.0",
 		"Damage amounts equal to or higher than this will prevent an infected player from reanimating. Use 0.0 for vanilla behavior (i.e. always reanimate).");
@@ -1997,9 +1750,6 @@ void CreateConVars()
 	g_qol_nonsolid_supply = CreateConVar("qol_zombie_attack_thru_supply", "1",
 		"Legacy option that makes all supply boxes non-solid so players can't hide on top.");
 	g_qol_nonsolid_supply.AddChangeHook(ConVar_OnNonSolidSupplyChange);
-
-	g_qol_zombie_prop_exploit_fix = CreateConVar("qol_zombie_prop_exploit_fix", "1",
-		"Fix an exploit where zombies won't attack when an object is held within their hull.");
 
 	g_qol_zombie_prevent_attack_backwards = CreateConVar("qol_zombie_prevent_attack_backwards", "1",
 		"Prevent zombie swipe attacks damaging players directly behind the zombie.");
@@ -2078,9 +1828,6 @@ void CreateConVars()
 		"Volume of medical sounds heard by players not healing. E.g. 1.0 means full volume. Use 0.0 for vanilla behavior (no sounds).",
 		_, true, 0.0, true, 1.0);
 
-	g_qol_medical_wield = CreateConVar("qol_medical_wield", "1",
-		"Allow players to wield medical items at any time (so they may be thrown).");
-
 	//
 	// Game
 	//
@@ -2123,8 +1870,6 @@ public void OnMapStart()
 	g_model_zombie_kid_boy = QOL_PrecacheModel(MODEL_ZOMBIE_KID_BOY);
 	g_model_zombie_kid_girl = QOL_PrecacheModel(MODEL_ZOMBIE_KID_GIRL);
 
-	g_carried_props.Clear();
-
 	g_round_reset_time = -1.0;
 	g_round_start_time = 0.0;
 	g_round_end_time = 0.0;
@@ -2147,7 +1892,6 @@ public void OnMapStart()
 
 	DHookGamerules(g_dhook_next_best_weapon, true);
 	DHookGamerules(g_dhook_allow_late_join_spawning, true);
-	DHookGamerules(g_dhook_any_spawn_point_for_skater, true);
 	DHookGamerules(g_dhook_is_copied_spawn_point_clear, true);
 
 	// Spawn plugin entities.
@@ -2192,7 +1936,6 @@ public void OnClientPutInServer(int client)
 	SDKHook(client, SDKHook_OnTakeDamage, Hook_PlayerTakeDamage);
 	SDKHook(client, SDKHook_OnTakeDamageAlive, Hook_PlayerTakeDamageAlive);
 	SDKHook(client, SDKHook_WeaponSwitch, Hook_PlayerWeaponSwitch);
-	SDKHook(client, SDKHook_WeaponEquip, Hook_PlayerWeaponEquip);
 
 	// Forcibly call WeaponSwitch for current weapon.
 	int active_weapon = GetEntPropEnt(client, Prop_Send, "m_hActiveWeapon");
@@ -2271,8 +2014,7 @@ void QOL_OnNewEntity(int entity, const char[] classname, bool spawning)
 			}
 			else if (StrEqual(classname[postfix], "kidzombie"))
 			{
-				// Fix kid t-pose when pushed from side or back.
-				DHookEntity(g_dhook_fix_kid_shove_activity, true, entity);
+				// Fix kid t-pose when climbing.
 				DHookEntity(g_dhook_forbid_zombie_climb_activity, true, entity);
 			}
 
@@ -2280,15 +2022,7 @@ void QOL_OnNewEntity(int entity, const char[] classname, bool spawning)
 
 			// Remember which zombie the player shoved last.
 			DHookEntity(g_dhook_on_zombie_shoved, true, entity);
-
-			// Allow zombies to attack when an item is held within their hull.
-			DHookEntity(g_dhook_fix_zombie_item_exploit, true, entity);
 		}
-	}
-	else if (StrEqual(classname, EXTRACTION_CAMERA))
-	{
-		// Remove legacy flags causing extraction cameras to stay at player origin
-		SDKHook(entity, SDKHook_SpawnPost, Hook_PatchExtractionCamera);
 	}
 	else if (StrEqual(classname, PROJECTILE_FRAG) || StrEqual(classname, PROJECTILE_TNT))
 	{
@@ -2304,20 +2038,15 @@ void QOL_OnNewEntity(int entity, const char[] classname, bool spawning)
 		if (spawning)
 		{
 			SDKHook(entity, SDKHook_SpawnPost, Hook_UnstickCarriedObject);
-			SDKHook(entity, SDKHook_Use, Hook_PreventWeaponizedProps);
 		}
 	}
-	else if (!strncmp(classname, HEALTH_STATION_PREFIX, sizeof(HEALTH_STATION_PREFIX) - 1) ||
-		!strncmp(classname, SAFEZONE_SUPPLY_PREFIX, sizeof(SAFEZONE_SUPPLY_PREFIX) - 1) ||
-		StrEqual(classname, INVENTORY_BOX))
+	else if (StrEqual(classname, INVENTORY_BOX))
 	{
 		if (spawning)
 		{
 			SDKHook(entity, SDKHook_SpawnPost, Hook_DontBlockZombieAttack);
 
-			if (g_qol_nonsolid_supply.BoolValue &&
-				IsSurvival() &&
-				StrEqual(classname, INVENTORY_BOX))
+			if (g_qol_nonsolid_supply.BoolValue && IsSurvival() && StrEqual(classname, INVENTORY_BOX))
 			{
 				SDKHook(entity, SDKHook_ThinkPost, Hook_ItemBoxThink);
 			}
@@ -2376,7 +2105,7 @@ void QOL_OnNewEntity(int entity, const char[] classname, bool spawning)
 		DHookEntity(g_dhook_melee_stamina_drain, true, entity);
 	}
 
-	if (SDKCall(g_sdkcall_is_combat_weapon, entity))
+	if (IsEntityWeapon(entity))
 	{
 		// Customize weapon speeds.
 		if (!is_melee)
@@ -2457,16 +2186,6 @@ public void Hook_ItemBoxThink(int item_box)
 	if (!stay_hooked)
 	{
 		SDKUnhook(item_box, SDKHook_ThinkPost, Hook_ItemBoxThink);
-	}
-}
-
-public void Hook_PatchExtractionCamera(int camera)
-{
-	int spawnflags = GetEntProp(camera, Prop_Data, "m_spawnflags");
-	if (spawnflags & SF_CAMERA_BADFLAGS)
-	{
-		spawnflags &= ~SF_CAMERA_BADFLAGS;
-		SetEntProp(camera, Prop_Data, "m_spawnflags", spawnflags);
 	}
 }
 
@@ -2553,13 +2272,12 @@ public void Hook_CheckNationalGuardDrop(int entity)
 /**
  * This event is called just prior to a round reset.
  */
-public Event_GameRestarting(Event event, const char[] name, bool no_broadcast)
+public void Event_GameRestarting(Event event, const char[] name, bool no_broadcast)
 {
 	g_round_reset_time = GetGameTime();
 	g_last_respawn_time = 0.0;
 	g_round_start_time = 0.0;
 	g_round_end_time = 0.0;
-	g_carried_props.Clear();
 	ClearRespawnPoints();
 }
 
@@ -2633,204 +2351,20 @@ public Action Event_PrePlayerSpawn(Event event, const char[] name, bool no_broad
 
 	if (client != 0 && NMRiH_IsPlayerAlive(client))
 	{
-		if (playerData[client].skatingRespawning)
-		{
-			// Eat event and recreate player according to saved settings.
-			playerData[client].skatingRespawning = false;
-			RequestFrame(OnFrame_ReEquipSkatingPlayer, userid);
-			result = Plugin_Handled;
-		}
-		else if (playerData[client].skatingPlayerData == null)
-		{
-			ResetPlayer(client);
-			playerData[client].spawnTime = GetGameTime();
-			playerData[client].canLateSpawn = false;
+		ResetPlayer(client);
+		playerData[client].spawnTime = GetGameTime();
+		playerData[client].canLateSpawn = false;
 
-			// Add player's steam ID to recently spawned list.
-			int player_steam_id = GetSteamAccountID(client, true);
-			if (player_steam_id != 0 && 
-				g_steam_ids_of_late_spawned_players.FindValue(player_steam_id) == -1)
-			{
-				g_steam_ids_of_late_spawned_players.Push(player_steam_id);
-			}
+		// Add player's steam ID to recently spawned list.
+		int player_steam_id = GetSteamAccountID(client, true);
+		if (player_steam_id != 0 && 
+			g_steam_ids_of_late_spawned_players.FindValue(player_steam_id) == -1)
+		{
+			g_steam_ids_of_late_spawned_players.Push(player_steam_id);
 		}
 	}
 
 	return result;
-}
-
-/**
- * Reinfect the player one frame later than re-equip.
- *
- * Trying to infect the player the frame after respawning doesn't
- * work.
- *
- * Doesn't maintain infection overlay's alpha!
- */
-public void OnFrame_ReInfectPlayer(int userid)
-{
-	int client = GetClientOfUserId(userid);
-	if (client == 0)
-	{
-		return;
-	}
-
-	DataPack data = playerData[client].skatingPlayerData;
-	if (data != null)
-	{
-		data.Reset();
-
-		float delta_seconds = GetGameTime() - ReadPackFloat(data);
-		float infection_time = ReadPackFloat(data) + delta_seconds;
-		float death_time = ReadPackFloat(data) + delta_seconds;
-
-		SDKCall(g_sdkcall_player_become_infected, client);
-
-		SetEntPropFloat(client, Prop_Send, "m_flInfectionTime", infection_time);
-		SetEntPropFloat(client, Prop_Send, "m_flInfectionDeathTime", death_time);
-
-		delete data;
-		playerData[client].skatingPlayerData = null;
-	}
-}
-
-/**
- * Setup respawning skating player as if they never respawned.
- *
- * The player's infection overlay is reset and I'm unsure how to
- * restore its alpha.
- */
-public void OnFrame_ReEquipSkatingPlayer(int userid)
-{
-	int client = GetClientOfUserId(userid);
-	if (client == 0)
-	{
-		return;
-	}
-
-	DataPack data = playerData[client].skatingPlayerData;
-	if (data != null)
-	{
-		data.Reset();
-
-		char message[128];
-		int offset = Format(message, sizeof(message), "%T", "@skate-be-gone", client);
-
-		float delta_seconds = GetGameTime() - ReadPackFloat(data);
-		float infection_time = ReadPackFloat(data);
-		float death_time = ReadPackFloat(data);
-
-		bool infected = infection_time > 0.0 && death_time > 0.0;
-		if (infected)
-		{
-			RequestFrame(OnFrame_ReInfectPlayer, userid);
-			offset += Format(message[offset], sizeof(message) - offset, " %T", "@skate-still-infected", client);
-		}
-
-		float position[3];
-		float angles[3];
-		float velocity[3];
-
-		ReadPackVector(data, position);
-		ReadPackVector(data, angles);
-		ReadPackVector(data, velocity);
-
-		TeleportEntity(client, position, angles, velocity);
-
-		SetEntityHealth(client, ReadPackCell(data));
-
-		// Regenerate player's stamina for time spent waiting for respawn.
-		float regen_rate = g_sv_stam_regen_moving ? g_sv_stam_regen_moving.FloatValue : 6.0;
-		float stamina = ReadPackFloat(data) + regen_rate * delta_seconds;
-		float max_stamina = g_sv_max_stamina ? g_sv_max_stamina.FloatValue : 130.0;
-		if (stamina > max_stamina)
-		{
-			stamina = max_stamina;
-		}
-		else if (stamina < 0.0)
-		{
-			stamina = 0.0;
-		}
-
-		SetClientStamina(client, stamina);
-
-		SetEntProp(client, Prop_Send, "_vaccinated", ReadPackCell(data));
-
-		bool bleeding_out = ReadPackCell(data);
-		if (bleeding_out)
-		{
-			SDKCall(g_sdkcall_player_bleedout, client);
-		}
-
-		SetEntPropFloat(client, Prop_Data, "m_AirFinished", ReadPackFloat(data) + delta_seconds);
-		SetEntProp(client, Prop_Data, "m_idrowndmg", ReadPackCell(data));
-		SetEntProp(client, Prop_Data, "m_idrownrestored", ReadPackCell(data));
-		SetEntProp(client, Prop_Data, "m_nDrownDmgRate", ReadPackCell(data));
-
-		int ammo_size = ReadPackCell(data);
-		for (int i = 0; i < ammo_size; ++i)
-		{
-			SetEntProp(client, Prop_Send, PROP_NAME_PLAYER_AMMO, ReadPackCell(data), _, i);
-		}
-
-		char classname[CLASSNAME_MAX];
-
-		float origin[3];
-		CopyVector(position, origin);
-		origin[Z] += 32.0;
-
-		float zero[3] = { 0.0, ... };
-
-		int weapon_size = ReadPackCell(data);
-		for (int i = 0; i < weapon_size; ++i)
-		{
-			int weapon = ReadPackCell(data);
-			if (weapon != -1 && (weapon = EntRefToEntIndex(weapon)) != INVALID_ENT_REFERENCE)
-			{
-				GetEdictClassname(weapon, classname, sizeof(classname));
-
-				if (StrEqual(classname, WEAPON_FISTS) || StrEqual(classname, ITEM_ZIPPO))
-				{
-					AcceptEntityInput(weapon, "Kill");
-				}
-				else if (GetEntOwner(weapon) == -1)
-				{
-					TeleportEntity(weapon, origin, zero, zero);
-					AcceptEntityInput(weapon, "Use", client, client);
-				}
-			}
-		}
-
-		// Requip last weapon.
-		int active_weapon = EntRefToEntIndex(ReadPackCell(data));
-		int active_weapon_sequence = ReadPackCell(data);
-		if (active_weapon != INVALID_ENT_REFERENCE && GetEntOwner(active_weapon) == client)
-		{
-			NMRIH_EquipPlayerWeapon(client, active_weapon, active_weapon_sequence);
-		}
-
-		// Try to grab previous pickup if not much time has passed.
-		int pickup = ReadPackCell(data);
-		if (pickup != -1 && delta_seconds < 1.0)
-		{
-			AcceptEntityInput(pickup, "Use", client, client);
-		}
-
-		// Reset tokens in objective mode (otherwise game won't end when all players die).
-		if (!IsSurvival())
-		{
-			SetEntProp(client, Prop_Send, "m_iTokens", 0);
-		}
-
-		PrintToChat(client, message);
-
-		// Keep datapack for an extra frame if the player was infected.
-		if (!infected)
-		{
-			delete data;
-			playerData[client].skatingPlayerData = null;
-		}
-	}
 }
 
 /**
@@ -3009,17 +2543,6 @@ public void Event_ResetMap(Event event, const char[] name, bool no_broadcast)
  */
 void ResetPlayer(int player)
 {
-	// Nullify skating data.
-	playerData[player].skatingRespawning = false;
-	if (playerData[player].skatingPlayerData)
-	{
-		delete playerData[player].skatingPlayerData;
-		playerData[player].skatingPlayerData = null;
-	}
-
-	// Reset skate fix cooldown.
-	playerData[player].lastSkateTime = 0.0;
-
 	// Clear melee stamina information.
 	playerData[player].meleeEntsHit = 0;
 	playerData[player].meleeHitWorld = false;
@@ -3118,8 +2641,8 @@ void CreditPlayerForPropFireKill(int zombie)
 }
 
 /**
- * Monitor cutscene activation. We prevent players from using the skate-fix
- * command while a cutscene is active.
+ * Monitor cutscene activation. We prevent zombies from grabbing players
+ * while a cutscene is active.
  */
 public void Event_CutsceneToggle(Event event, const char[] name, bool no_broadcast)
 {
@@ -3158,54 +2681,6 @@ public void Output_OnSpawnPointEnable(
 {
 	Hook_NewSpawnPoint(caller);
 }
-
-/**
- * Fired when a player equips a weapon.
- *
- * @param client        Client that equipped the weapon.
- * @param weapon        Edict of the weapon that the player equipped.
- */
-public Action Hook_PlayerWeaponEquip(int client, int weapon)
-{
-	if (!IsValidEdict(weapon))
-	{
-		return Plugin_Continue;
-	}
-
-	char targetname[64];
-	GetEntTargetname(weapon, targetname, sizeof(targetname));
-
-	if (targetname[0])
-	{
-		DataPack data = new DataPack();
-		data.WriteCell(EntIndexToEntRef(weapon));
-		data.WriteString(targetname);
-		RequestFrame(OnFrame_RestoreWeaponTargetname, data);		
-	}
-
-	return Plugin_Continue;
-}
-
-/**
- * Prevent weapons from losing their assigned targetname when equipped
- * This fixes glow blips and ensures the weapon still glows when dropped
- *
- * @param data        DataPack housing the weapon reference and targetname
- */
-void OnFrame_RestoreWeaponTargetname(DataPack data)
-{
-	data.Reset();
-	int weapon = EntRefToEntIndex(data.ReadCell());
-	if (weapon != -1)
-	{
-		char targetname[64];
-		data.ReadString(targetname, sizeof(targetname));
-		SetEntTargetname(weapon, targetname);
-	}
-
-	delete data;
-}
-
 
 /**
  * Cache the type of weapon equipped by each player. One string compare here
@@ -3288,12 +2763,7 @@ public Action Hook_PlayerTakeDamage(
 {
 	Action result = Plugin_Continue;
 
-	if (g_qol_func_breakable_player_damage_fix.BoolValue && player == attacker && attacker == inflictor && damage_type == DMG_SLASH)
-	{
-		// Prevent func_breakable from hurting the player on touch.
-		result = Plugin_Stop;
-	}
-	else if (attacker > MaxClients && IsValidEdict(attacker) && SDKCall(g_sdkcall_is_npc, attacker))
+	if (attacker > MaxClients && IsValidEdict(attacker) && IsEntityNPC(attacker))
 	{
 		int sequence = GetEntSequence(attacker);
 		bool is_bite = IsZombieBiteSequence(sequence);
@@ -3784,41 +3254,11 @@ public void OnFrame_WatchCarriedObject(int player_pickup_ref)
 
 					RequestFrame(OnFrame_FixStuckObject, player_pickup_ref);
 				}
-
-				CachePropCollisionGroup(player_pickup, pickup);
 			}
 
 			playerData[player].doPickupFix = true;
 		}
 
-	}
-}
-
-/**
- * Store pickup's original collision group. (ConVar)
- */
-void CachePropCollisionGroup(int player_pickup, int pickup)
-{
-	if (g_qol_zombie_prop_exploit_fix.BoolValue)
-	{
-		int original_collision_group = GetEntData(player_pickup, g_offset_original_collision_group, 4);
-
-		int pickup_ref = EntIndexToEntRef(pickup);
-
-		// Lookup original collision group.
-		int index = g_carried_props.FindValue(pickup_ref, PropCollisionTuple::ent_ref);
-		if (index != -1)
-		{
-			original_collision_group = g_carried_props.Get(index, PropCollisionTuple::collision_group);
-		}
-		else
-		{
-			// Add new entry.
-			PropCollisionTuple collision_tuple;
-			collision_tuple.ent_ref = pickup_ref;
-			collision_tuple.collision_group = original_collision_group;
-			g_carried_props.PushArray(collision_tuple);
-		}
 	}
 }
 
@@ -3861,83 +3301,6 @@ public void OnFrame_FixStuckObject(int player_pickup_ref)
 public void Hook_UnstickCarriedObject(int player_pickup)
 {
 	RequestFrame(OnFrame_WatchCarriedObject, EntIndexToEntRef(player_pickup));
-}
-
-/**
- * Set object to collision group that prevents it being used like a weapon. (ConVar)
- */
-public void OnFrame_PreventWeaponizedProp(int pickup_ref)
-{
-	int index = g_carried_props.FindValue(pickup_ref, PropCollisionTuple::ent_ref);
-	if (index != -1)
-	{
-		int pickup = EntRefToEntIndex(pickup_ref);
-		if (pickup != INVALID_ENT_REFERENCE &&
-			g_qol_weaponized_object_fix.BoolValue)
-		{
-			// Prevent prop from being used as a weapon.
-			SetEntCollisionGroup(pickup, COLLISION_GROUP_CARRIED_OBJECT);
-		}
-		else
-		{
-			// Invalid pickup, we can safely remove this index.
-			RemoveArrayListElement(g_carried_props, index);
-		}
-	}
-}
-
-/**
- * Restore collision group used by an object before it was picked up. (ConVar)
- */
-public void OnFrame_RestorePropCollisionGroup(int pickup_ref)
-{
-	int index = g_carried_props.FindValue(pickup_ref, PropCollisionTuple::ent_ref);
-	if (index != -1)
-	{
-		int pickup = EntRefToEntIndex(pickup_ref);
-		if (pickup != INVALID_ENT_REFERENCE && g_qol_dropped_object_collision_fix.BoolValue)
-		{
-			// Return object to its original collision group.
-			int original_collision_group = g_carried_props.Get(index, PropCollisionTuple::collision_group);
-			SetEntCollisionGroup(pickup, original_collision_group);
-		}
-
-		RemoveArrayListElement(g_carried_props, index);
-	}
-}
-
-/**
- * Called when player_pickup carried object is dropped.
-
- * Prevent exploit where carried physics objects can be used as weapons. (ConVar)
- *
- * Also ensures the prop returns to its original collision group. (ConVar)
- */
-public Action Hook_PreventWeaponizedProps(
-	int player_pickup,
-	int activator,
-	int caller,
-	UseType use_type,
-	float value)
-{
-	if (use_type == Use_Off)
-	{
-		int pickup = GetEntPropEnt(player_pickup, Prop_Data, "m_attachedEntity");
-		if (pickup != -1)
-		{
-			int pickup_ref = EntIndexToEntRef(pickup);
-
-			// Anyone else holding it?
-			if (IsEntityHeldByPlayer(pickup, activator))
-			{
-				RequestFrame(OnFrame_PreventWeaponizedProp, pickup_ref);
-			}
-			else
-			{
-				RequestFrame(OnFrame_RestorePropCollisionGroup, pickup_ref);
-			}
-		}
-	}
 }
 
 /**
@@ -4024,7 +3387,7 @@ public void OnFrame_WatchArrows(int unused)
 				}
 
 				// Ignore object if it's a weapon (otherwise the arrow cannot be retrieved).
-				if (attached != -1 && !SDKCall(g_sdkcall_is_combat_weapon, attached))
+				if (attached != -1 && !IsEntityWeapon(attached))
 				{
 					// Attach arrow to object.
 					SDKCall(g_sdkcall_set_parent, arrow, attached, bone);
@@ -4132,202 +3495,6 @@ public void Hook_CheckNationalGuardCrawler(int zombie)
 	}
 }
 
-/**
- * Rate limit ice skating fix.
- */
-public Action Command_FixPlayerSkating(int client, int args)
-{
-	float cooldown = g_qol_skate_cooldown.FloatValue;
-	if (client > 0 && args < 1 && cooldown >= 0.0)
-	{
-		bool use_cooldown = true;
-
-		AdminId admin = GetUserAdmin(client);
-		if (admin != INVALID_ADMIN_ID && GetAdminFlags(admin, Access_Effective))
-		{
-			use_cooldown = false;
-		}
-
-		float last = playerData[client].lastSkateTime;
-		float now = GetGameTime();
-
-		if (!use_cooldown || now > last + cooldown)
-		{
-			playerData[client].lastSkateTime = now;
-			FixPlayerSkating(client);
-		}
-		else
-		{
-			float seconds = (last + cooldown) - now;
-			// "Please wait %d seconds."
-			PrintToChat(client, "%T", "@skate-cooldown", client, RoundToCeil(seconds));
-		}
-	}
-
-	return Plugin_Handled;
-}
-
-/**
- * Fix jittery/slidey player movement by respawning them.
- *
- * This may be caused by animations failing to update after model data has
- * been reloaded (e.g. after alt-tabbing). Affected client's that enter
- * thirdperson mode can see their character not animating and jittering.
- *
- */
-void FixPlayerSkating(int client)
-{
-	if (IsPlayerAlive(client))
-	{
-		if (g_in_cutscene)
-		{
-			// Forbid during cutscenes because the respawned player would
-			// be able to move again.
-			PrintToChat(client, "%T", "@skate-cutscene", client);
-			return;
-		}
-		else if (GetEntProp(client, Prop_Send, "m_bGrabbed"))
-		{
-			// Grabbed players will not re-equip weapons.
-			PrintToChat(client, "%T", "@skate-grabbed", client);
-			return;
-		}
-		else if (GetEntProp(client, Prop_Send, "m_bDucked"))
-		{
-			// Not sure how to restore player in crouched position, so forbid
-			// to prevent them getting stuck in ceiling.
-			PrintToChat(client, "%T", "@skate-ducked", client);
-			return;
-		}
-		else if (g_round_reset_time > g_round_start_time)
-		{
-			// Prevent players breaking free of pre-round freeze time.
-			PrintToChat(client, "%T", "@skate-preround", client);
-			return;
-		}
-
-		char classname[CLASSNAME_MAX];
-		int pickup = -1;
-
-		int use_entity = GetEntPropEnt(client, Prop_Send, "m_hUseEntity");
-		if (use_entity != -1 && IsValidEdict(use_entity))
-		{
-			static const char TRIGGER_PROGRESS_PREFIX[] = "trigger_progress";
-
-			if (IsClassnameEqual(use_entity, classname, sizeof(classname), PLAYER_PICKUP))
-			{
-				pickup = GetEntPropEnt(use_entity, Prop_Data, "m_attachedEntity");
-				if (pickup != -1 && !IsValidEdict(pickup))
-				{
-					pickup = -1;
-				}
-			}
-			else if (!strncmp(classname, TRIGGER_PROGRESS_PREFIX, sizeof(TRIGGER_PROGRESS_PREFIX) - 1))
-			{
-				// Fire extinguisher spray effect can become stuck. I assume it could also lock up objectives.
-				PrintToChat(client, "%T", "@skate-trigger-progress", client);
-				return;
-			}
-		}
-
-		float position[3];
-		float angles[3];
-		float velocity[3];
-
-		GetClientAbsOrigin(client, position);
-		GetClientEyeAngles(client, angles);
-		velocity[X] = GetEntPropFloat(client, Prop_Send, "m_vecVelocity[0]");
-		velocity[Y] = GetEntPropFloat(client, Prop_Send, "m_vecVelocity[1]");
-		velocity[Z] = GetEntPropFloat(client, Prop_Send, "m_vecVelocity[2]");
-
-		int health = GetClientHealth(client);
-		float stamina = GetClientStamina(client);
-		float infection_time = GetEntPropFloat(client, Prop_Send, "m_flInfectionTime");
-		float death_time = GetEntPropFloat(client, Prop_Send, "m_flInfectionDeathTime");
-		int vaccinated = GetEntProp(client, Prop_Send, "_vaccinated");
-		int bleeding_out = GetEntProp(client, Prop_Send, "_bleedingOut");
-
-		// Preserve survival tokens (should also prevent map from restarting
-		// while player respawns in objective mode).
-		int tokens = GetEntProp(client, Prop_Send, "m_iTokens");
-		SetEntProp(client, Prop_Send, "m_iTokens", tokens + 1);
-
-		// Preserve oxygen level.
-		float air_finished = GetEntPropFloat(client, Prop_Data, "m_AirFinished");
-		int drown_damage = GetEntProp(client, Prop_Data, "m_idrowndmg");
-		int drown_restored = GetEntProp(client, Prop_Data, "m_idrownrestored");
-		int drown_rate = GetEntProp(client, Prop_Data, "m_nDrownDmgRate");
-
-		DataPack data = new DataPack();
-		if (!data)
-		{
-			LogError("Couldn't allocate DataPack for respawn.");
-			return;
-		}
-
-		WritePackFloat(data, GetGameTime());
-		WritePackFloat(data, infection_time);
-		WritePackFloat(data, death_time);
-
-		WritePackVector(data, position);
-		WritePackVector(data, angles);
-		WritePackVector(data, velocity);
-
-		WritePackCell(data, health);
-		WritePackFloat(data, stamina);
-		WritePackCell(data, vaccinated);
-		WritePackCell(data, bleeding_out);
-
-		// Don't need to store tokens as they've already been set.
-
-		WritePackFloat(data, air_finished);
-		WritePackCell(data, drown_damage);
-		WritePackCell(data, drown_restored);
-		WritePackCell(data, drown_rate);
-
-		// It's important to read player's ammo amount before dropping weapons
-		// because doing the opposite causes grenades to permanently consume
-		// inventory space.
-		int ammo_size = GetEntPropArraySize(client, Prop_Send, PROP_NAME_PLAYER_AMMO);
-		WritePackCell(data, ammo_size);
-		for (int i = 0; i < ammo_size; ++i)
-		{
-			int ammo = GetEntProp(client, Prop_Send, PROP_NAME_PLAYER_AMMO, _, i);
-			WritePackCell(data, ammo);
-		}
-
-		int active_weapon = GetClientActiveWeapon(client);
-		int active_weapon_sequence = -1;
-		if (active_weapon != -1 && IsValidEdict(active_weapon))
-		{
-			active_weapon_sequence = GetEntSequence(active_weapon);
-		}
-
-		static const char PROP_NAME_WEAPONS[] = "m_hMyWeapons";
-		int weapon_size = GetEntPropArraySize(client, Prop_Send, PROP_NAME_WEAPONS);
-		WritePackCell(data, weapon_size);
-		for (int i = 0; i < weapon_size; ++i)
-		{
-			int weapon = GetEntPropEnt(client, Prop_Send, PROP_NAME_WEAPONS, i);
-			if (weapon != -1)
-			{
-				SDKHooks_DropWeapon(client, weapon, NULL_VECTOR, NULL_VECTOR);
-				weapon = EntIndexToEntRef(weapon);
-			}
-			WritePackCell(data, weapon);
-		}
-
-		WritePackCell(data, EntIndexToEntRef(active_weapon));
-		WritePackCell(data, active_weapon_sequence);
-
-		WritePackCell(data, pickup);
-
-		playerData[client].skatingRespawning = true;
-		playerData[client].skatingPlayerData = data;
-
-		SDKCall(g_sdkcall_player_respawn, client);
-	}
-}
 
 /**
  * Watch for barricade placement to play hammering sound to other players. (ConVar)
@@ -4467,7 +3634,7 @@ public bool Trace_IgnoreEntPlayersAndNPCs(int entity, int contents_mask, int to_
 	bool hit = entity != to_ignore && (entity <= 0 || entity > MaxClients);
 	if (hit && entity > MaxClients)
 	{
-		hit = !SDKCall(g_sdkcall_is_npc, entity);
+		hit = !IsEntityNPC(entity);
 	}
 	return hit;
 }
@@ -4486,7 +3653,7 @@ public bool Trace_ZombieGrab(int entity, int contents_mask, int to_ignore)
 	if (hit && entity > MaxClients)
 	{
 		// Ignore NPCs.
-		hit = !SDKCall(g_sdkcall_is_npc, entity);
+		hit = !IsEntityNPC(entity);
 	}
 	return hit;
 }
@@ -4502,7 +3669,7 @@ public bool Trace_ZombieAttack(int entity, int contents_mask, int to_ignore)
 	if (hit && entity > MaxClients)
 	{
 		// Ignore physics objects and NPCs.
-		hit = GetEntityMoveType(entity) != MOVETYPE_VPHYSICS && !SDKCall(g_sdkcall_is_npc, entity);
+		hit = GetEntityMoveType(entity) != MOVETYPE_VPHYSICS && !IsEntityNPC(entity);
 	}
 	return hit;
 }
@@ -4516,7 +3683,7 @@ public bool Trace_PlayerMultishove(int entity, int contents_mask, ArrayList zomb
 
 	if (entity > MaxClients)
 	{
-		if (SDKCall(g_sdkcall_is_npc, entity))
+		if (IsEntityNPC(entity))
 		{
 			zombies.Push(entity);
 		}
@@ -4615,9 +3782,8 @@ stock bool NMRiH_IsPlayerAlive(int client)
 {
 	bool alive = false;
 	if (client > 0 && client <= MaxClients && IsClientInGame(client))
-	{
-		alive = GetEntData(client, g_offset_player_state, 4) == STATE_ACTIVE;
-	}
+		alive = GetEntProp(client, Prop_Send, "m_iPlayerState") == STATE_ACTIVE;
+	
 	return alive;
 }
 
@@ -5003,7 +4169,7 @@ stock float GetEntDistance(int ent_a, int ent_b, bool squared = false, bool hori
 /**
  * Copy the values of one vector to another.
  */
-stock void CopyVector(const float source[3], float dest[3])
+void CopyVector(const float source[3], float dest[3])
 {
 	dest[X] = source[X];
 	dest[Y] = source[Y];
@@ -5011,85 +4177,9 @@ stock void CopyVector(const float source[3], float dest[3])
 }
 
 /**
- * Copy the values of one vector to another.
- */
-stock void AssignVector(float x, float y, float z, float dest[3])
-{
-	dest[X] = x;
-	dest[Y] = y;
-	dest[Z] = z;
-}
-
-/**
- * Read an array of integers from a DataPack.
- *
- * @param data          Handle to DataPack to read from.
- * @param array         Output buffer to store values.
- * @param array_size    Number of elements to read into array.
- */
-stock ReadPackArray(Handle data, int[] array, int array_size)
-{
-	for (int i = 0; i < array_size; ++i)
-	{
-		array[i] = ReadPackCell(data);
-	}
-}
-
-/**
- * Write an array of integers to a DataPack.
- *
- * @param data          Handle to DataPack to write to.
- * @param array         Buffer of values to write.
- * @param array_size    Number of elements in array to write.
- */
-stock WritePackArray(Handle data, int[] array, int array_size)
-{
-	for (int i = 0; i < array_size; ++i)
-	{
-		WritePackCell(data, array[i]);
-	}
-}
-
-/**
- * Helper function to read three floats from a DataPack into a vector.
- */
-stock ReadPackVector(Handle data, float vec[3])
-{
-	vec[X] = ReadPackFloat(data);
-	vec[Y] = ReadPackFloat(data);
-	vec[Z] = ReadPackFloat(data);
-}
-
-/**
- * Helper function to write three floats from a vector to a DataPack.
- */
-stock WritePackVector(Handle data, const float vec[3])
-{
-	WritePackFloat(data, vec[X]);
-	WritePackFloat(data, vec[Y]);
-	WritePackFloat(data, vec[Z]);
-}
-
-/**
- * Clamp a float value to a range.
- */
-stock float FloatClamp(float value, float min, float max)
-{
-	if (value > max)
-	{
-		value = max;
-	}
-	if (value < min)
-	{
-		value = min;
-	}
-	return value;
-}
-
-/**
  * Check if two floats are close enough to be considered equal.
  */
-stock bool FloatEqual(float a, float b, float epsilon = 0.0001)
+bool FloatEqual(float a, float b, float epsilon = 0.0001)
 {
 	return FloatAbs(a - b) < epsilon;
 }
@@ -5097,9 +4187,19 @@ stock bool FloatEqual(float a, float b, float epsilon = 0.0001)
 /**
  * Check if two vectors are the same using an epsilon-based float compare.
  */
-stock bool VectorEqual(float a[3], float b[3], float epsilon = 0.0001)
+bool VectorEqual(float a[3], float b[3], float epsilon = 0.0001)
 {
 	return FloatEqual(a[X], b[X], epsilon) &&
 		FloatEqual(a[Y], b[Y], epsilon) &&
 		FloatEqual(a[Z], b[Z], epsilon);
+}
+
+bool IsEntityNPC(int entity)
+{
+	return HasEntProp(entity, Prop_Data, "m_NPCState");
+}
+
+bool IsEntityWeapon(int entity)
+{
+	return HasEntProp(entity, Prop_Send, "_bloodCount");
 }

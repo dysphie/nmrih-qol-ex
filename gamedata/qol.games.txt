@@ -11,22 +11,6 @@
 				"windows" "\x55\x8B\xEC\x53\x8B\x5D\x08\x56\x57\x8B\xF9\x39\x9F\xE0\x01\x00\x00"
 				"linux" "@_ZN11CBaseEntity17SetCollisionGroupEi"
 			}
-
-			"CBaseAnimating::SelectWeightedSequence"
-			{
-				// int (Activity)
-				"library" "server"
-				"windows" "\x55\x8B\xEC\x56\x8B\xF1\x57\x80\xBE\x31\x03\x00\x00\x00\x8B\xBE\xA8\x03\x00\x00"
-				"linux" "@_ZN14CBaseAnimating22SelectWeightedSequenceE8Activity"
-			}
-
-			"CNMRiH_Player::Bleedout"
-			{
-				// void ()
-				"library" "server"
-				"windows" "\x55\x8B\xEC\x51\x56\x57\x8B\xF9\xC6\x45\xFF\x01\x8D\x4D\xFF\x8A\x87\x23\x13\x00\x00"
-				"linux" "@_ZN13CNMRiH_Player8BleedOutEv"
-			}
 		}
 
 		"Offsets"
@@ -48,19 +32,6 @@
 			{
 				"windows" "829"
 				"linux" "849"
-			}
-
-			"CSDKPlayer::m_iPlayerState"
-			{
-				"windows" "4808"
-				"linux" "4828"
-			}
-
-			"CBaseEntity::m_iOriginalCollisionGroup"
-			{
-				// Collision group of object before being picked up.
-				"windows" "9164" 
-				"linux" "9184"
 			}
 
 			// ================================================================
@@ -111,20 +82,6 @@
 				"linux" "35"
 			}
 
-			"CBaseEntity::IsNPC"
-			{
-				// bool ()
-				"windows" "71"
-				"linux" "72"
-			}
-
-			"CBaseEntity::IsBaseCombatWeapon"
-			{
-				// bool ()
-				"windows" "87"
-				"linux" "88"
-			}
-
 			// ================================================================
 			// Medical Weapons
 
@@ -151,42 +108,21 @@
 				"linux" "220"
 			}
 
-			"CBaseSDKGrenade::StartGrenadeThrow" 
-			{
-				// void ()
-				"linux" "434"
-				"windows" "433"
-			}
-
-			"CBaseSDKGrenade::EmitGrenade"
-			{
-				//void (Vector,QAngle,Vector,Vector,CBasePlayer *,CWeaponSDKBase *)
-				"linux" "438"
-				"windows" "437"
-			}
-
 			// ================================================================
 			// Zombie
 
 			"CNMRiH_BaseZombie::m_bCrawler"
 			{
 				// bool
-				"windows" "3732" 
-				"linux" "3748"
+				"windows" "3756"
+				"linux" "3772"
 			}
 
-			"CNMRiH_BaseZombie::bHasArmor"
+			"CNMRiH_BaseZombie::bHasArmor" 
 			{
 				// bool
-				"windows" "3733"
-				"linux" "3749"
-			}
-
-			"CNMRiH_BaseZombie::MeleeAttack1Conditions" 
-			{
-				// int (float, float)
-				"windows" "536"
-				"linux" "540"
+				"windows" "3757"
+				"linux" "3773" 
 			}
 
 			"CNMRiH_BaseZombie::GetShoved" 
@@ -201,13 +137,6 @@
 				// Activity (Activity)
 				"windows" "259"
 				"linux" "260"
-			}
-
-			"CAI_BaseNPC::TranslateSchedule" 
-			{
-				// int (int)
-				"windows" "357"
-				"linux" "358"
 			}
 
 			// ================================================================
@@ -253,22 +182,6 @@
 				// void (void)
 				"windows" "418"
 				"linux" "419"
-			}
-
-			// ================================================================
-			// Player
-
-			"CNMRiH_Player::BecomeInfected" 
-			{
-				// void ()
-				"windows" "333"
-				"linux" "334"
-			}
-
-			"CBasePlayer::ForceRespawn" 
-			{
-				"windows" "340"
-				"linux" "341"
 			}
 		}
 	}
