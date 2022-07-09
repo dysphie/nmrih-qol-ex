@@ -290,7 +290,6 @@ DynamicHook g_dhook_is_copied_spawn_point_clear;     // Skips nearby zombie chec
 
 DynamicHook g_dhook_handle_medical_autoswitch_to;    // Handle whether medical items can be auto-switched to.
 DynamicHook g_dhook_call_medical_item_forward;       // Notify other scripts that a medical item was just used.
-DynamicHook g_dhook_allow_any_medical_wield;         // Allows medical items to be wielded any time (but still respects consume rules).
 
 DynamicHook g_dhook_weapon_pre_sight_toggle;
 DynamicHook g_dhook_weapon_post_sight_toggle;
@@ -329,7 +328,6 @@ ConVar g_qol_round_start_spawn_grace;           // Number of seconds after round
 ConVar g_qol_respawn_grace;                     // Number of seconds after a respawn that connecting players will still be allowed to spawn.
 ConVar g_qol_respawn_ahead_threshold;           // Players that spawn this many seconds before a respawn event will be teleported to the newer respawn points.
 ConVar g_qol_prevent_late_spawn_abuse;          // When non-zero, late spawned players are added to a list. The players on that list will not be late-spawned if they reconnect. The list is cleared at each respawn event.
-ConVar g_qol_barricade_damage_volume;           // Controls volume of new barricade damage sounds.
 ConVar g_qol_barricade_hammer_volume;           // Controls volume of barricade sounds heard by non-barricading players.
 ConVar g_qol_barricade_retrieve_health;         // Minimum percent of health a barricade can and still be recollected with the barricade hammer.
 ConVar g_qol_barricade_show_damage;             // Darken boards according to their damage amount.
@@ -1454,10 +1452,6 @@ void CreateConVars()
 	g_qol_arrow_fix = CreateConVar("qol_arrow_fix", "1",
 		"Allow arrows to rotate with doors, stick to brush entities and fixes arrows that could not be recollected.");
 
-	g_qol_barricade_damage_volume = CreateConVar("qol_barricade_damage_volume", "1.0",
-		"Volume of QOL barricade damage sounds. Use 0.0 for vanilla behavior.",
-		_, true, 0.0, true, 1.0);
-
 	g_qol_barricade_hammer_volume = CreateConVar("qol_barricade_hammer_volume", "1.0",
 		"Volume of barricade hammering sounds heard by players that are not barricading. E.g. 1.0 means full volume. Use 0.0 for vanilla behavior.",
 		_, true, 0.0, true, 1.0);
@@ -1643,7 +1637,6 @@ void QOL_OnNewEntity(int entity, const char[] classname, bool spawning)
 	if (IsEntityMedical(entity))
 	{
 		DHookEntity(g_dhook_call_medical_item_forward, true, entity);
-		DHookEntity(g_dhook_allow_any_medical_wield, true, entity);
 		DHookEntity(g_dhook_handle_medical_autoswitch_to, true, entity);
 	}
 	else if (!strncmp(classname, NPC_PREFIX, sizeof(NPC_PREFIX) - 1))
