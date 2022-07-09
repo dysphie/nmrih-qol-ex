@@ -20,7 +20,6 @@
 // * Barricades play sound effects when damaged and break.
 // * Barricade hammer sounds are emitted to other players.
 // * Barricade boards can be recollected with barricade hammer's charged attack.
-// * Medical items play sounds for other players to hear.
 // * Allow players to shove during ironsight raise/lower animation.
 // * Allow players' shove to hit multiple zombies.
 // * Allow late-joining players to spawn during a customizable grace period.
@@ -30,7 +29,6 @@
 #include <sourcemod>
 #include <sdktools>
 #include <sdkhooks>
-
 #include <dhooks>
 
 #pragma semicolon 1
@@ -48,6 +46,7 @@
 #define SHUFFLE_SOUND_COUNT 2
 
 #define SOUND_GRENADE_THROW "weapons/slam/throw.wav"
+
 
 // Sequences used during zombie bite.
 #define SEQUENCE_CRAWLER_BITE 9
@@ -79,6 +78,7 @@
 #define COLLISION_GROUP_NONE 0
 #define COLLISION_GROUP_DEBRIS 1
 #define COLLISION_GROUP_INVENTORY_BOX 34
+#define COLLISION_GROUP_CARRIED_OBJECT 34
 
 #define STATE_ACTIVE 0  // Player state code used by living players.
 
@@ -146,24 +146,6 @@ static const char SOUNDS_SKS_STAB_HEAD[][] =
 	"weapons/firearms/sks_bayonet_hit2.wav",
 };
 
-// Barricade takes damage.
-static const char SOUNDS_BARRICADE_DAMAGE[][] =
-{
-	"weapons/melee/hammer/board_damage-light1.wav",
-	"weapons/melee/hammer/board_damage-light2.wav",
-	"weapons/melee/hammer/board_damage-light4.wav",
-	"weapons/melee/hammer/board_damage-heavy1.wav",
-	"weapons/melee/hammer/board_damage-heavy2.wav",
-	"weapons/melee/hammer/board_damage-heavy3.wav"
-};
-
-// Barricade is destroyed.
-static const char SOUNDS_BARRICADE_BREAK[][] =
-{
-	"weapons/melee/hammer/board_damage-broken1.wav",
-	"weapons/melee/hammer/board_damage-broken2.wav"
-};
-
 // Entity types that National Guards can spawn.
 static const char NATIONAL_GUARD_DROPS[][] =
 {
@@ -200,16 +182,13 @@ static const char INVENTORY_BOX[] = "item_inventory_box";
 static const char PLAYER_PICKUP[] = "player_pickup";
 static const char PLAYER_SPAWN_POINT[] = "info_player_nmrih";
 
-static const char MODEL_ZOMBIE_KID_BOY[] = "models/nmr_zombie/zombiekid_boy.mdl";
-static const char MODEL_ZOMBIE_KID_GIRL[] = "models/nmr_zombie/zombiekid_girl.mdl";
-
 public Plugin myinfo =
 {
 	name = "[NMRiH] Quality of Life (Dysphie's fork)",
 	author = "Ryan",
 	description = "Fixes bugs, adds features, improves No More Room in Hell!",
 	version = QOL_VERSION,
-	url = ""
+	url = "https://github.com/dysphie/nmrih-qol-ex"
 };
 
 enum struct PropVictim
@@ -224,7 +203,7 @@ enum struct ZombieTuple
 	int hookid;
 }
 
-enum struct PropCollisionTuple
+enum struct PropCollisionData
 {
 	int ent_ref;            // Ent reference
 	int collision_group;    // Original collision group
@@ -250,25 +229,21 @@ bool g_plugin_loaded_late = false;
 // QOL globals
 //
 
-int g_model_zombie_kid_boy = 0;     // Model index of boy zombie kid.
-int g_model_zombie_kid_girl = 0;    // Model index of girl zombie kid.
-
 bool g_map_loaded = false;          // True between OnMapStart() and OnMapEnd()
 bool g_in_cutscene = false;
 bool g_last_wave_was_resupply;      // True if the last survival wave was a resupply.
 float g_round_reset_time = -1.0;
 float g_round_start_time = 0.0;
-float g_round_end_time = 0.0;
 float g_last_respawn_time = 0.0;    // GameTime of last respawn event.
 bool g_force_respawn = true;        // When true, late-connecting players will be respawned even when realism is on. Set to true at the end of a resupply wave.
 int g_score_adder = -1;             // Ent reference to game_score used to count fire-based kills.
 
-StringMap g_medical_sounds;         // Maps weapon name to DataPacks of sounds played during medical animation.
 ArrayList g_dead_national_guard;    // For backwards compatibility with any plugins using QOL's forward.
 ArrayList g_zombie_prop_victims;    // Zombies hurt by explosive props: tuples of (zombie id, id of client that attacked)
 ArrayList g_arrow_projectiles;      // References to live arrow projectiles.
 ArrayList g_spawning_ammo_boxes;    // References to ammo boxes currently being spawned.
 ArrayList g_multishove_zombies;     // Stores ent indices of zombies hit by potential multishove.
+ArrayList g_carried_props;          // List of PropCollisionData. Stores props and their collision group before pickup.
 ArrayList g_spawn_point_copies;     // Ent references to copies of the last batch of enabled/spawned spawn points.
 ArrayList g_steam_ids_of_late_spawned_players; // Steam account IDs of all players respawned since the last respawn point
 
@@ -303,6 +278,7 @@ int g_offset_is_crawler;                        // Offset of crawler boolean in 
 int g_offset_is_national_guard;                 // Offset of armored zombie boolean in zombie data.
 int g_offset_barricade_point_physics_ent;       // Offset of pBoard in CNMRiH_BarricadePoint.
 int g_offset_playerspawn_enabled;               // Offset of m_bEnabled in CNMRiH_PlayerSpawn.
+int g_offset_original_collision_group;           // Offset of m_iOriginalCollisionGroup in CPlayerPickupController.
 
 //
 // DHook handles
@@ -314,7 +290,6 @@ DynamicHook g_dhook_is_copied_spawn_point_clear;     // Skips nearby zombie chec
 
 DynamicHook g_dhook_handle_medical_autoswitch_to;    // Handle whether medical items can be auto-switched to.
 DynamicHook g_dhook_call_medical_item_forward;       // Notify other scripts that a medical item was just used.
-DynamicHook g_dhook_allow_any_medical_wield;         // Allows medical items to be wielded any time (but still respects consume rules).
 
 DynamicHook g_dhook_weapon_pre_sight_toggle;
 DynamicHook g_dhook_weapon_post_sight_toggle;
@@ -335,7 +310,6 @@ DynamicHook g_dhook_on_zombie_shoved;                // Store reference to last 
 
 Handle g_sdkcall_weapon_has_ammo;               // Returns true if a weapon has ammo or doesn't need ammo.
 Handle g_sdkcall_get_item_weight;               // Get an item's weight (this is the item's inventory weight and auto-switch priority).
-Handle g_sdkcall_set_entity_collision_group;    // Change an entity's collision group.
 Handle g_sdkcall_set_parent;                    // Setup an entity to have a parent. void CBaseEntity::SetParent(CBaseEntity *, int)
 Handle g_sdkcall_are_tokens_given_from_kills;   // Check whether game mode is using tokens.
 Handle g_sdkcall_get_player_spawn_spot;         // Move player to an available spawn spot.
@@ -349,11 +323,11 @@ Handle g_forward_used_gene_therapy;             // Gene.
 Handle g_forward_barricade_collected;           // Called whenever player recollects a placed barricade. Receives: int client, int barricade.
 
 // Quality of Life convars.
+ConVar g_qol_zombie_prop_exploit_fix;           // Fix exploit where zombies don't attack when an item is held inside of their body.
 ConVar g_qol_round_start_spawn_grace;           // Number of seconds after round start that connecting players will still be allowed to spawn.
 ConVar g_qol_respawn_grace;                     // Number of seconds after a respawn that connecting players will still be allowed to spawn.
 ConVar g_qol_respawn_ahead_threshold;           // Players that spawn this many seconds before a respawn event will be teleported to the newer respawn points.
 ConVar g_qol_prevent_late_spawn_abuse;          // When non-zero, late spawned players are added to a list. The players on that list will not be late-spawned if they reconnect. The list is cleared at each respawn event.
-ConVar g_qol_barricade_damage_volume;           // Controls volume of new barricade damage sounds.
 ConVar g_qol_barricade_hammer_volume;           // Controls volume of barricade sounds heard by non-barricading players.
 ConVar g_qol_barricade_retrieve_health;         // Minimum percent of health a barricade can and still be recollected with the barricade hammer.
 ConVar g_qol_barricade_show_damage;             // Darken boards according to their damage amount.
@@ -384,17 +358,12 @@ ConVar g_qol_multishove_distance;               // Distance to allow player shov
 ConVar g_qol_multishove_max_pushed;             // Maximum number of zombies to push when multi-shove is enabled.
 ConVar g_qol_sks_bayonet_sounds;                // Play extra headstab sound on bayonet stab.
 ConVar g_qol_medical_auto_switch_style;         // How to handle auto-switching to medical items.
-ConVar g_qol_medical_volume;                    // Volume of medical sounds as heard by other players.
 
 // NMRiH convars.
 ConVar g_sv_tags;
 ConVar g_sv_difficulty;
 ConVar g_sv_realism;
-ConVar g_sv_max_stamina;
-ConVar g_sv_stam_regen_moving;
-ConVar g_sv_zombie_reach;
 ConVar g_sv_barricade_health;
-ConVar g_cl_barricade_board_model;
 
 /**
  * Check if the plugin is loading late.
@@ -402,6 +371,7 @@ ConVar g_cl_barricade_board_model;
 public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
 {
 	g_plugin_loaded_late = late;
+	return APLRes_Success;
 }
 
 /**
@@ -498,188 +468,6 @@ public MRESReturn DHook_CallMedicalItemForward(int medicine, Handle return_handl
 	return MRES_Ignored;
 }
 
-/**
- * Begin audible healing. (ConVar)
- *
- * Native signature:
- * bool CNMRiH_BaseMedicalItem::ShouldUseMedicalItem(void) const
- */
-public MRESReturn DHook_OnAttemptMedicalUse(int medicine, Handle return_handle)
-{
-	if (DHookGetReturn(return_handle))
-	{
-		int owner = GetEntOwner(medicine);
-		if (owner != -1)
-			StartMedicalSounds(owner, medicine);
-	}
-
-	return MRES_Ignored;
-}
-
-/**
- * Start watching the weapon's sequence and playing the client's sounds
- * to everyone else.
- *
- * Also handle playback speed change of medical animations. Medical items
- * use two animations Once the first animation ends the playback speed
- * is reset to 1.0. To prevent this, we reset the playback speed to the
- * custom value when the sequence starts.
- *
- * @param client    ID of client using medicine.
- * @param medicine  ID of medical item being used.
- */
-void StartMedicalSounds(int client, int medicine)
-{
-	char classname[CLASSNAME_MAX];
-	GetEdictClassname(medicine, classname, sizeof(classname));
-
-	DataPack medical_data = null;
-	g_medical_sounds.GetValue(classname, medical_data);
-
-	DataPack data = CreateDataPack();
-	data.WriteCell(medical_data);   // possibly null
-	data.WriteCell(client);
-	data.WriteCell(EntIndexToEntRef(medicine));
-	data.WriteFloat(-1.0);  // sequence start time (currently unknown)
-
-	// Frame of the last sound we emitted to others.
-	int last_sound_frame = -1;
-	data.WriteCell(last_sound_frame);
-
-	OnFrame_ContinueMedicalSounds(data);
-}
-
-/**
- * Called each frame to see how far along the player is in sequence
- * and whether a new sound should be emitted.
- */
-public void OnFrame_ContinueMedicalSounds(DataPack data)
-{
-	data.Reset();
-
-	int sequence = -1;
-	int fps = -1;
-
-	DataPack medical_data = data.ReadCell();
-	if (medical_data)
-	{
-		medical_data.Reset();
-		sequence = medical_data.ReadCell();
-		fps = medical_data.ReadCell();
-	}
-
-	int client = data.ReadCell();
-	int medicine = EntRefToEntIndex(data.ReadCell());
-
-	DataPackPos start_time_pos = data.Position;
-	float start_time = data.ReadFloat();
-
-	DataPackPos last_sound_frame_pos = data.Position;
-	int last_sound_frame = data.ReadCell();
-
-	bool check_again = false;
-
-	if (IsClientInGame(client) &&
-		IsPlayerAlive(client) &&
-		medicine != INVALID_ENT_REFERENCE &&
-		GetClientActiveWeapon(client) == medicine)
-	{
-		int current_sequence = GetEntSequence(medicine);
-		int last_sequence = GetEntPreviousSequence(medicine);
-
-		if (current_sequence == sequence && start_time == -1.0)
-		{
-			if (g_qol_medical_volume.FloatValue <= 0.0 || !medical_data)
-			{
-				delete data;
-				return;
-			}
-
-			start_time = GetGameTime();
-			data.Position = start_time_pos;
-			data.WriteFloat(start_time);
-		}
-
-		if (current_sequence == sequence)
-		{
-			float rate = GetEntPropFloat(medicine, Prop_Send, "m_flPlaybackRate");
-			if (rate == 0.0)
-			{
-				rate = 1.0;
-			}
-			int frame = RoundToFloor((GetGameTime() - start_time) * (float(fps) * rate));
-
-			char sound_name[64];
-
-			// Iterate over data to find next sound frame (negative number marks end of sounds).
-			int sound_frame = medical_data.ReadCell();
-			while (sound_frame >= 0 && frame >= sound_frame)
-			{
-				medical_data.ReadString(sound_name, sizeof(sound_name));
-
-				if (last_sound_frame < sound_frame)
-				{
-					last_sound_frame = sound_frame;
-
-					data.Position = last_sound_frame_pos;
-					data.WriteCell(last_sound_frame);
-
-					EmitMedicalSound(client, sound_name);
-				}
-
-				sound_frame = medical_data.ReadCell();
-			}
-
-			// Keep checking if more sounds exist.
-			check_again = sound_frame >= 0;
-		}
-		else
-		{
-			// Keep checking because the medical sequence hasn't even started yet.
-			check_again = last_sequence != sequence;
-		}
-	}
-
-	if (check_again)
-	{
-		RequestFrame(OnFrame_ContinueMedicalSounds, data);
-	}
-	else
-	{
-		delete data;
-	}
-}
-
-/**
- * Plays a game sound to everyone but the specified client at the
- * server's medical sound volume.
- */
-void EmitMedicalSound(int client, const char[] game_sound)
-{
-	int others[MAXPLAYERS_NMRIH];
-	int count = GetOtherClients(client, others);
-
-	if (count > 0)
-	{
-		// Retrieve sound name and parameters from game sound.
-		char sound_name[128];
-		int channel = SNDCHAN_AUTO;
-		int sound_level = SNDLEVEL_NORMAL;
-		float volume = SNDVOL_NORMAL;
-		int pitch = SNDPITCH_NORMAL;
-		GetGameSoundParams(game_sound, channel, sound_level, volume, pitch,
-			sound_name, sizeof(sound_name), client);
-
-		sound_level = SNDLEVEL_FRIDGE;
-		sound_level = SNDLEVEL_NORMAL - 8;
-		channel = SNDCHAN_ITEM;
-		volume = g_qol_medical_volume.FloatValue;
-
-		// Play sound.
-		EmitSound(others, count, sound_name, client, channel, sound_level,
-			SND_CHANGEVOL | SND_CHANGEPITCH, volume, pitch);
-	}
-}
 
 /**
  * Shove all zombies directly in front of player. (ConVar)
@@ -829,7 +617,7 @@ int IsEntityHeldByPlayer(int entity, int to_ignore = -1)
 	int player = 0;
 	for (int i = 1; i < MaxClients && player == 0; ++i)
 	{
-		if (i != to_ignore && IsClientInGame(i) && IsPlayerAlive(i))
+		if (i != to_ignore && IsClientInGame(i) && NMRiH_IsPlayerAlive(i))
 		{
 			int use_entity = GetEntPropEnt(i, Prop_Send, "m_hUseEntity");
 			if (use_entity != -1 &&
@@ -1242,7 +1030,7 @@ public MRESReturn DHook_AllowLateJoinSpawning(Handle return_handle, Handle param
  */
 bool IsRoundStartedButNotEnded()
 {
-	return g_round_end_time == 0.0;
+	return GameRules_GetProp("_roundState") == 3;
 }
 
 /**
@@ -1316,7 +1104,7 @@ public MRESReturn DHook_IsCopiedSpawnPointClear(Handle return_handle, Handle par
 /**
  * From HL2 SDK util_shared.cpp
  */
-bool UTIL_IsSpaceEmpty(int ent, float[3] bounds_min, float[3] bounds_max)
+bool UTIL_IsSpaceEmpty(int ent, float bounds_min[3], float bounds_max[3])
 {
 	float half_bounds[3];
 	SubtractVectors(bounds_max, bounds_min, half_bounds);
@@ -1348,18 +1136,6 @@ int GameConfGetOffsetOrFail(Handle gameconf, const char[] key)
 		SetFailState("Failed to read gamedata offset of %s", key);
 	}
 	return offset;
-}
-
-/**
- * Prep SDKCall from signature or abort.
- */
-void GameConfPrepSDKCallSignatureOrFail(Handle gameconf, const char[] key)
-{
-	if (!PrepSDKCall_SetFromConf(gameconf, SDKConf_Signature, key))
-	{
-		CloseHandle(gameconf);
-		SetFailState("Failed to retrieve signature for gamedata key %s", key);
-	}
 }
 
 /**
@@ -1398,103 +1174,16 @@ public void ConVar_OnNonSolidSupplyChange(ConVar convar, const char[] old, const
 
 			if (collision_group != -1)
 			{
-				SetEntCollisionGroup(i, collision_group);
+				SetEntityCollisionGroup(i, collision_group);
 			}
 		}
-	}
-}
-
-/**
- * Try to import KeyValues from a config file.
- */
-bool ImportConfigKeyValues(KeyValues& kv, const char[] file)
-{
-	char file_path[PLATFORM_MAX_PATH];
-	BuildPath(Path_SM, file_path, sizeof(file_path), "configs/%s.cfg", file);
-
-	return kv.ImportFromFile(file_path);
-}
-
-/**
- * Read QOL's default config.
- */
-bool LoadConfig()
-{
-	KeyValues kv = new KeyValues("qol");
-	if (ImportConfigKeyValues(kv, "qol"))
-	{
-		LoadMedicalSounds(kv);
-	}
-}
-
-/**
- * Read client sound and frame pairs for medical items from key-values.
- */
-void LoadMedicalSounds(KeyValues kv)
-{
-	if (kv.JumpToKey("client_sounds"))
-	{
-		if (kv.GotoFirstSubKey(KEYS_ONLY))
-		{
-			char weapon_name[CLASSNAME_MAX];
-			char sound_name[64];
-			char frame_key[8];
-
-			do
-			{
-				kv.GetSectionName(weapon_name, sizeof(weapon_name));
-
-				int sequence = kv.GetNum("sequence", -1);
-				int fps = kv.GetNum("fps", -1);
-
-				if (fps == -1)
-				{
-					LogMessage("Warning: Weapon %s in QOL config is missing FPS key.", weapon_name);
-				}
-				else if (sequence == -1)
-				{
-					LogMessage("Warning: Weapon %s in QOL config is missing sequence key.", weapon_name);
-				}
-				else if (kv.JumpToKey("sounds") && kv.GotoFirstSubKey(KEYS_AND_VALUES))
-				{
-					DataPack data = CreateDataPack();
-
-					data.WriteCell(sequence);
-					data.WriteCell(fps);
-
-					do
-					{
-						kv.GetSectionName(frame_key, sizeof(frame_key));
-						int frame = StringToInt(frame_key);
-
-						kv.GetString(NULL_STRING, sound_name, sizeof(sound_name), "");
-
-						data.WriteCell(frame);
-						data.WriteString(sound_name);
-					} while (kv.GotoNextKey(KEYS_AND_VALUES));
-
-					data.WriteCell(-1);
-
-					bool replace = false;
-					if (!g_medical_sounds.SetValue(weapon_name, data, replace))
-					{
-						LogMessage("Warning: Failed to add weapon %s to medical sound map.", weapon_name);
-					}
-
-					kv.GoBack(); // GotoFirstSubKey
-					kv.GoBack(); // JumpToKey
-				}
-			} while (kv.GotoNextKey(KEYS_ONLY));
-		}
-
-		kv.Rewind();
 	}
 }
 
 public void OnPluginStart()
 {
 	// Game data is necesary for our DHooks/SDKCalls.
-	Handle gameconf = LoadGameConfigFile("qol.games");
+	GameData gameconf = new GameData("qol.games");
 	if (!gameconf)
 	{
 		SetFailState("Failed to load QOL game data.");
@@ -1503,42 +1192,37 @@ public void OnPluginStart()
 	LoadDHooks(gameconf);
 	LoadSDKCalls(gameconf);
 
-	CloseHandle(gameconf);
-
-	g_medical_sounds = new StringMap();
+	delete gameconf;
 
 	// List of zombies that were hurt by exploding props.
 	g_zombie_prop_victims = new ArrayList(sizeof(PropVictim), 0);
 
 	// List of dead national guard ent refs.
-	g_dead_national_guard = new ArrayList(1, 0);
+	g_dead_national_guard = new ArrayList();
 
 	// List of flying arrow projectiles.
-	g_arrow_projectiles = new ArrayList(1, 0);
+	g_arrow_projectiles = new ArrayList();
 
 	// List of ammo boxes being spawned (to be checked for invalid ammo amount).
-	g_spawning_ammo_boxes = new ArrayList(1, 0);
+	g_spawning_ammo_boxes = new ArrayList();
 
-	g_multishove_zombies = new ArrayList(1, 0);     // Ent indices to zombies caught by multishove trace.
-	g_spawn_point_copies = new ArrayList(1, 0);     // Ent references to copies of last batch of enabled/spawned spawn points.
+	g_multishove_zombies = new ArrayList();     // Ent indices to zombies caught by multishove trace.
+	g_spawn_point_copies = new ArrayList();     // Ent references to copies of last batch of enabled/spawned spawn points.
+
+	// Stores ent refs to carried objects and their collision group pre-pickup.
+	g_carried_props = new ArrayList(sizeof(PropCollisionData));
 
 	g_steam_ids_of_late_spawned_players = new ArrayList(1, 0);
 
-	LoadConfig();
 	CreateConVars();
 
 	g_sv_tags = FindConVar("sv_tags");
 	g_sv_difficulty = FindConVar("sv_difficulty");
 	g_sv_realism = FindConVar("sv_realism");
-	g_sv_max_stamina = FindConVar("sv_max_stamina");
-	g_sv_stam_regen_moving = FindConVar("sv_stam_regen_moving");
-	g_sv_zombie_reach = FindConVar("sv_zombie_reach");
 	g_sv_barricade_health = FindConVar("sv_barricade_health");
-	g_cl_barricade_board_model = FindConVar("cl_barricade_board_model");
 
 	HookEvent("new_wave", Event_NewWave);
 	HookEvent("nmrih_reset_map", Event_ResetMap);
-	HookEvent("state_change", Event_StateChange);
 	HookEvent("freeze_all_the_things", Event_CutsceneToggle);
 	HookEvent("game_restarting", Event_GameRestarting);
 	HookEvent("nmrih_practice_ending", Event_GameRestarting);
@@ -1590,6 +1274,8 @@ void LoadDHooks(Handle gameconf)
 	g_offset_barricade_point_physics_ent = GameConfGetOffsetOrFail(gameconf, "CNMRiH_BarricadePoint::pBoard");
 	g_offset_playerspawn_enabled = GameConfGetOffsetOrFail(gameconf, "CNMRiH_PlayerSpawn::m_bEnabled");
 
+	g_offset_original_collision_group = GameConfGetOffsetOrFail(gameconf, "CPlayerPickupController::m_iOriginalCollisionGroup");
+
 	int offset;
 
 	// Hook to modify weapon auto-switch.
@@ -1615,10 +1301,6 @@ void LoadDHooks(Handle gameconf)
 	// Hook that watches for medical item activation.
 	offset = GameConfGetOffsetOrFail(gameconf, "CNMRiH_BaseMedicalItem::ApplyMedicalItem_Internal");
 	g_dhook_call_medical_item_forward = DHookCreate(offset, HookType_Entity, ReturnType_Void, ThisPointer_CBaseEntity, DHook_CallMedicalItemForward);
-
-	// Hook that modifies the equip rules for medical items.
-	offset = GameConfGetOffsetOrFail(gameconf, "CNMRiH_BaseMedicalItem::ShouldUseMedicalItem");
-	g_dhook_allow_any_medical_wield = DHookCreate(offset, HookType_Entity, ReturnType_Bool, ThisPointer_CBaseEntity, DHook_OnAttemptMedicalUse);
 
 	// Improve grenade effectiveness and play explosion sounds.
 	offset = GameConfGetOffsetOrFail(gameconf, "CBaseGrenade::Detonate");
@@ -1678,12 +1360,6 @@ void LoadSDKCalls(Handle gameconf)
 	PrepSDKCall_SetReturnInfo(SDKType_PlainOldData, SDKPass_Plain);
 	g_sdkcall_get_item_weight = EndPrepSDKCall();
 
-	// Change entity's collision group.
-	StartPrepSDKCall(SDKCall_Entity);
-	GameConfPrepSDKCallSignatureOrFail(gameconf, "CBaseEntity::SetCollisionGroup");
-	PrepSDKCall_AddParameter(SDKType_PlainOldData, SDKPass_Plain);  // int, collision group
-	g_sdkcall_set_entity_collision_group = EndPrepSDKCall();
-
 	// Used to parent arrows to objects they hit.
 	offset = GameConfGetOffsetOrFail(gameconf, "CBaseEntity::SetParent");
 	StartPrepSDKCall(SDKCall_Entity);
@@ -1735,6 +1411,7 @@ void CreateConVars()
 	g_qol_stuck_object_fix = CreateConVar("qol_stuck_object_fix", "1",
 		"Allow players to pickup items that are clipping into geometry. Fixes sprint-lock issue with supply crate.");
 
+	// FIXME: Restore these two
 	g_qol_weaponized_object_fix = CreateConVar("qol_weaponized_object_fix", "1",
 		"Prevent exploit that allows physics objects to damage players and zombies by being smashed into them.");
 
@@ -1747,6 +1424,9 @@ void CreateConVars()
 	g_qol_nonsolid_supply = CreateConVar("qol_zombie_attack_thru_supply", "1",
 		"Legacy option that makes all supply boxes non-solid so players can't hide on top.");
 	g_qol_nonsolid_supply.AddChangeHook(ConVar_OnNonSolidSupplyChange);
+
+	g_qol_zombie_prop_exploit_fix = CreateConVar("qol_zombie_prop_exploit_fix", "1",
+		"Fix an exploit where zombies won't attack when an object is held within their hull.");
 
 	g_qol_zombie_prevent_attack_backwards = CreateConVar("qol_zombie_prevent_attack_backwards", "1",
 		"Prevent zombie swipe attacks damaging players directly behind the zombie.");
@@ -1771,10 +1451,6 @@ void CreateConVars()
 	//
 	g_qol_arrow_fix = CreateConVar("qol_arrow_fix", "1",
 		"Allow arrows to rotate with doors, stick to brush entities and fixes arrows that could not be recollected.");
-
-	g_qol_barricade_damage_volume = CreateConVar("qol_barricade_damage_volume", "1.0",
-		"Volume of QOL barricade damage sounds. Use 0.0 for vanilla behavior.",
-		_, true, 0.0, true, 1.0);
 
 	g_qol_barricade_hammer_volume = CreateConVar("qol_barricade_hammer_volume", "1.0",
 		"Volume of barricade hammering sounds heard by players that are not barricading. E.g. 1.0 means full volume. Use 0.0 for vanilla behavior.",
@@ -1821,10 +1497,6 @@ void CreateConVars()
 	g_qol_medical_auto_switch_style = CreateConVar("qol_medical_auto_switch_style", "1",
 		"Auto-switch behavior. 0: Switch if medicine is heavier than current weapon. 1: Switch if medicine is heavier than current weapon and is usable. 2: Switch if medicine is usable (even if a heavier weapon exists). 3: Never auto-switch to medical items.");
 
-	g_qol_medical_volume = CreateConVar("qol_medical_volume", "1",
-		"Volume of medical sounds heard by players not healing. E.g. 1.0 means full volume. Use 0.0 for vanilla behavior (no sounds).",
-		_, true, 0.0, true, 1.0);
-
 	//
 	// Game
 	//
@@ -1864,12 +1536,8 @@ public void OnMapStart()
 {
 	g_map_loaded = true;
 
-	g_model_zombie_kid_boy = QOL_PrecacheModel(MODEL_ZOMBIE_KID_BOY);
-	g_model_zombie_kid_girl = QOL_PrecacheModel(MODEL_ZOMBIE_KID_GIRL);
-
 	g_round_reset_time = -1.0;
 	g_round_start_time = 0.0;
-	g_round_end_time = 0.0;
 	g_last_respawn_time = 0.0;
 
 	QOL_PrecacheSoundArray(SOUNDS_EXPLODE, sizeof(SOUNDS_EXPLODE));
@@ -1879,8 +1547,6 @@ public void OnMapStart()
 
 	QOL_PrecacheSoundArray(SOUNDS_SKS_STAB_HEAD, sizeof(SOUNDS_SKS_STAB_HEAD));
 
-	QOL_PrecacheSoundArray(SOUNDS_BARRICADE_DAMAGE, sizeof(SOUNDS_BARRICADE_DAMAGE));
-	QOL_PrecacheSoundArray(SOUNDS_BARRICADE_BREAK, sizeof(SOUNDS_BARRICADE_BREAK));
 	PrecacheSound(SOUND_BARRICADE_COLLECT, true);
 
 	PrecacheSound(SOUND_NULL, true);
@@ -1898,19 +1564,6 @@ public void OnMapStart()
 public void OnMapEnd()
 {
 	g_map_loaded = false;
-}
-
-/**
- * Precache a model or log a warning message.
- */
-int QOL_PrecacheModel(const char[] model_name)
-{
-	int index = PrecacheModel(model_name, true);
-	if (index == 0)
-	{
-		LogMessage("Warning: Failed to precache model: %s", model_name);
-	}
-	return index;
 }
 
 /**
@@ -1984,7 +1637,6 @@ void QOL_OnNewEntity(int entity, const char[] classname, bool spawning)
 	if (IsEntityMedical(entity))
 	{
 		DHookEntity(g_dhook_call_medical_item_forward, true, entity);
-		DHookEntity(g_dhook_allow_any_medical_wield, true, entity);
 		DHookEntity(g_dhook_handle_medical_autoswitch_to, true, entity);
 	}
 	else if (!strncmp(classname, NPC_PREFIX, sizeof(NPC_PREFIX) - 1))
@@ -2035,6 +1687,7 @@ void QOL_OnNewEntity(int entity, const char[] classname, bool spawning)
 		if (spawning)
 		{
 			SDKHook(entity, SDKHook_SpawnPost, Hook_UnstickCarriedObject);
+			SDKHook(entity, SDKHook_Use, Hook_PreventWeaponizedProps);
 		}
 	}
 	else if (StrEqual(classname, INVENTORY_BOX))
@@ -2053,15 +1706,15 @@ void QOL_OnNewEntity(int entity, const char[] classname, bool spawning)
 			Hook_DontBlockZombieAttack(entity);
 		}
 	}
-	else if (StrEqual(classname, "prop_physics_multiplayer"))
+	else if (StrEqual(classname, "nmrih_barricade_prop"))
 	{
 		if (spawning)
 		{
-			SDKHook(entity, SDKHook_SpawnPost, Hook_CheckBarricade);
+			SDKHook(entity, SDKHook_SpawnPost, Hook_BarricadeSpawned);
 		}
 		else
 		{
-			Hook_CheckBarricade(entity);
+			Hook_BarricadeSpawned(entity);
 		}
 	}
 
@@ -2137,7 +1790,7 @@ public void Hook_KillEntity(int entity)
 {
 	if (IsValidEntity(entity))
 	{
-		AcceptEntityInput(entity, "Kill");
+		RemoveEntity(entity);
 	}
 }
 
@@ -2161,7 +1814,7 @@ public void Hook_DontBlockZombieAttack(int entity)
 {
 	if (g_qol_nonsolid_supply.BoolValue)
 	{
-		SetEntCollisionGroup(entity, COLLISION_GROUP_DEBRIS);
+		SetEntityCollisionGroup(entity, COLLISION_GROUP_DEBRIS);
 	}
 }
 
@@ -2176,7 +1829,7 @@ public void Hook_ItemBoxThink(int item_box)
 
 	if (stay_hooked && GetEntCollisionGroup(item_box) != COLLISION_GROUP_DEBRIS)
 	{
-		SetEntCollisionGroup(item_box, COLLISION_GROUP_DEBRIS);
+		SetEntityCollisionGroup(item_box, COLLISION_GROUP_DEBRIS);
 		stay_hooked = false;
 	}
 
@@ -2274,7 +1927,6 @@ public void Event_GameRestarting(Event event, const char[] name, bool no_broadca
 	g_round_reset_time = GetGameTime();
 	g_last_respawn_time = 0.0;
 	g_round_start_time = 0.0;
-	g_round_end_time = 0.0;
 	ClearRespawnPoints();
 }
 
@@ -2468,7 +2120,7 @@ void HandleRespawnEvent(bool even_in_realism = false)
 		{
 			for (int i = 1; i <= MaxClients; ++i)
 			{
-				if (IsClientInGame(i) && IsPlayerAlive(i))
+				if (IsClientInGame(i) && NMRiH_IsPlayerAlive(i))
 				{
 					playerData[i].canLateSpawn = true;
 				}
@@ -2572,20 +2224,6 @@ void ClearRespawnPoints()
 	g_spawn_point_copies.Clear();
 }
 
-/**
- * Store round end time. We do this so we know when not to respawn players.
- */
-public void Event_StateChange(Event event, const char[] name, bool no_broadcast)
-{
-	int game_type = event.GetInt("game_type");
-	int state = event.GetInt("state");
-
-	if ((game_type == GAME_TYPE_OBJECTIVE && (state == OBJECTIVE_STATE_OVERRUN || state == OBJECTIVE_STATE_EXTRACTED)) ||
-		(game_type == GAME_TYPE_SURVIVAL && (state == SURVIVAL_STATE_OVERRUN || state == SURVIVAL_STATE_EXTRACTED)))
-	{
-		g_round_end_time = GetGameTime();
-	}
-}
 
 /**
  * Attribute zombie fire deaths to the correct player. (ConVar)
@@ -2660,7 +2298,7 @@ public void Output_OnHealthStationActivated(
 	if (g_qol_nonsolid_supply.BoolValue)
 	{
 		// Move health station to debris collision group to allow zombies to attack through it.
-		SetEntCollisionGroup(caller, COLLISION_GROUP_DEBRIS);
+		SetEntityCollisionGroup(caller, COLLISION_GROUP_DEBRIS);
 	}
 }
 
@@ -2914,21 +2552,12 @@ void HandleBayonetSounds(
 }
 
 /**
- * Check if prop_physics is a barricade.
+ * Set up hooks for barricades.
  */
-public void Hook_CheckBarricade(int barricade)
+void Hook_BarricadeSpawned(int barricade)
 {
-	char model_name[CLASSNAME_MAX];
-	GetEntPropString(barricade, Prop_Data, "m_ModelName", model_name, sizeof(model_name));
-
-	char board_model[CLASSNAME_MAX];
-	g_cl_barricade_board_model.GetString(board_model, sizeof(board_model));
-
-	if (StrEqual(model_name, board_model))
-	{
-		SetEntityRenderMode(barricade, RENDER_TRANSCOLOR);
-		SDKHook(barricade, SDKHook_OnTakeDamage, Hook_BarricadeTakeDamage);
-	}
+	SetEntityRenderMode(barricade, RENDER_TRANSCOLOR);
+	SDKHook(barricade, SDKHook_OnTakeDamage, Hook_BarricadeTakeDamage);
 }
 
 
@@ -2950,8 +2579,7 @@ public Action Hook_BarricadeTakeDamage(
 
 	// Prevent zombies from hitting more than one barricade at a time. (ConVar)
 	float damage_reduction = g_qol_barricade_zombie_multihit_ignore.FloatValue;
-	if (damage_reduction > 0.0 && attacker > MaxClients &&
-		HasEntProp(attacker, Prop_Data, "m_hBlockingBarricade"))
+	if (damage_reduction > 0.0 && attacker > MaxClients && IsEntityNPC(attacker))
 	{
 		int barricade_point = GetEntPropEnt(attacker, Prop_Data, "m_hBlockingBarricade");
 		if (barricade_point != -1) // FIXME: This never evaluates to true
@@ -3039,31 +2667,6 @@ public Action Hook_BarricadeTakeDamage(
 	}
 
 	float health_remaining = health - damage;
-
-	// Play sound according to amount of damage taken. (ConVar)
-	float sound_volume = g_qol_barricade_damage_volume.FloatValue;
-	if (sound_volume > 0.0)
-	{
-		char sound_name[128];
-		if (health_remaining <= 0.0)
-		{
-			static int previous[SHUFFLE_SOUND_COUNT] = { -1, ... };
-			int sound_index = ShuffleSoundIndex(sizeof(SOUNDS_BARRICADE_BREAK), previous);
-			strcopy(sound_name, sizeof(sound_name), SOUNDS_BARRICADE_BREAK[sound_index]);
-		}
-		else
-		{
-			static int previous[SHUFFLE_SOUND_COUNT] = { -1, ... };
-			int sound_index = ShuffleSoundIndex(sizeof(SOUNDS_BARRICADE_DAMAGE), previous);
-			strcopy(sound_name, sizeof(sound_name), SOUNDS_BARRICADE_DAMAGE[sound_index]);
-		}
-
-		// Randomize pitch slightly.
-		int pitch = SNDPITCH_NORMAL + RoundToNearest(GetURandomFloat() * 10.0 - 5.0);
-
-		EmitSoundToAll(sound_name, barricade, SNDCHAN_AUTO, SNDLEVEL_NORMAL,
-			SND_CHANGEVOL | SND_CHANGEPITCH, sound_volume, pitch);
-	}
 
 	// Map brightness of barricade to its health. (ConVar)
 	float blackest = g_qol_barricade_show_damage.FloatValue;
@@ -3251,11 +2854,41 @@ public void OnFrame_WatchCarriedObject(int player_pickup_ref)
 
 					RequestFrame(OnFrame_FixStuckObject, player_pickup_ref);
 				}
+
+				CachePropCollisionGroup(player_pickup, pickup);
 			}
 
 			playerData[player].doPickupFix = true;
 		}
 
+	}
+}
+
+/**
+ * Store pickup's original collision group. (ConVar)
+ */
+void CachePropCollisionGroup(int player_pickup, int pickup)
+{
+	if (g_qol_zombie_prop_exploit_fix.BoolValue)
+	{
+		int original_collision_group = GetEntData(player_pickup, g_offset_original_collision_group, 4);
+
+		int pickup_ref = EntIndexToEntRef(pickup);
+
+		// Lookup original collision group.
+		int index = g_carried_props.FindValue(pickup_ref, PropCollisionData::ent_ref);
+		if (index != -1)
+		{
+			original_collision_group = g_carried_props.Get(index, PropCollisionData::collision_group);
+		}
+		else
+		{
+			// Add new entry.
+			PropCollisionData data;
+			data.ent_ref = pickup_ref;
+			data.collision_group = original_collision_group;
+			g_carried_props.PushArray(data);
+		}
 	}
 }
 
@@ -3298,6 +2931,83 @@ public void OnFrame_FixStuckObject(int player_pickup_ref)
 public void Hook_UnstickCarriedObject(int player_pickup)
 {
 	RequestFrame(OnFrame_WatchCarriedObject, EntIndexToEntRef(player_pickup));
+}
+
+public void OnFrame_PreventWeaponizedProp(int pickup_ref)
+{
+	int index = g_carried_props.FindValue(pickup_ref, PropCollisionData::ent_ref);
+	if (index != -1)
+	{
+		int pickup = EntRefToEntIndex(pickup_ref);
+		if (pickup != INVALID_ENT_REFERENCE &&
+			g_qol_weaponized_object_fix.BoolValue)
+		{
+			// Prevent prop from being used as a weapon.
+			SetEntityCollisionGroup(pickup, COLLISION_GROUP_CARRIED_OBJECT);
+		}
+		else
+		{
+			// Invalid pickup, we can safely remove this index.
+			RemoveArrayListElement(g_carried_props, index);
+		}
+	}
+}
+
+/**
+ * Restore collision group used by an object before it was picked up. (ConVar)
+ */
+public void OnFrame_RestorePropCollisionGroup(int pickup_ref)
+{
+	int index = g_carried_props.FindValue(pickup_ref, PropCollisionData::ent_ref);
+	if (index != -1)
+	{
+		int pickup = EntRefToEntIndex(pickup_ref);
+		if (pickup != INVALID_ENT_REFERENCE &&
+			g_qol_dropped_object_collision_fix.BoolValue)
+		{
+			// Return object to its original collision group.
+			int original_collision_group = g_carried_props.Get(index, PropCollisionData::collision_group);
+			SetEntityCollisionGroup(pickup, original_collision_group);
+		}
+
+		RemoveArrayListElement(g_carried_props, index);
+	}
+}
+
+/**
+ * Called when player_pickup carried object is dropped.
+
+ * Prevent exploit where carried physics objects can be used as weapons. (ConVar)
+ *
+ * Also ensures the prop returns to its original collision group. (ConVar)
+ */
+public Action Hook_PreventWeaponizedProps(
+	int player_pickup,
+	int activator,
+	int caller,
+	UseType use_type,
+	float value)
+{
+	if (use_type == Use_Off)
+	{
+		int pickup = GetEntPropEnt(player_pickup, Prop_Data, "m_attachedEntity");
+		if (pickup != -1)
+		{
+			int pickup_ref = EntIndexToEntRef(pickup);
+
+			// Anyone else holding it?
+			if (IsEntityHeldByPlayer(pickup, activator))
+			{
+				RequestFrame(OnFrame_PreventWeaponizedProp, pickup_ref);
+			}
+			else
+			{
+				RequestFrame(OnFrame_RestorePropCollisionGroup, pickup_ref);
+			}
+		}
+	}
+
+	return Plugin_Continue;
 }
 
 /**
@@ -3502,7 +3212,7 @@ public Action Timer_GameTimer(Handle timer)
 	{
 		bool stop_hammering = true;
 
-		if (IsClientInGame(i) && IsPlayerAlive(i))
+		if (IsClientInGame(i) && NMRiH_IsPlayerAlive(i))
 		{
 			// Emit barricade sounds to other players. (ConVar)
 			if (g_qol_barricade_hammer_volume.BoolValue && playerData[i].weaponType == WEAPON_TYPE_BARRICADE)
@@ -3785,7 +3495,7 @@ stock bool NMRiH_IsPlayerAlive(int client)
 }
 
 /**
- * Because Sourcemod's EquipPlayerWeapon doesn't work in NMRiH.
+ * Because Sourcemod's EquipPlayerWeapon doesn't update carried weight properly
  */
 stock void NMRIH_EquipPlayerWeapon(int client, int weapon, int sequence = -1)
 {
@@ -4029,16 +3739,6 @@ stock int GetEntCollisionGroup(int entity)
 }
 
 /**
- * Change an entity's collision group.
- *
- * Call the native function to avoid the Physical Mayhem bug.
- */
-stock void SetEntCollisionGroup(int entity, int group)
-{
-	SDKCall(g_sdkcall_set_entity_collision_group, entity, group);
-}
-
-/**
  * Retrieve an entity's targetname (the name assigned to it in Hammer).
  *
  * @param entity            Entity to query.
@@ -4193,7 +3893,9 @@ bool VectorEqual(float a[3], float b[3], float epsilon = 0.0001)
 
 bool IsEntityNPC(int entity)
 {
-	return HasEntProp(entity, Prop_Data, "m_NPCState");
+	char classname[11];
+	GetEntityClassname(entity, classname, sizeof(classname));
+	return StrEqual("npc_nmrih_", classname);
 }
 
 bool IsEntityWeapon(int entity)
