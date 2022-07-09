@@ -2,19 +2,14 @@
 {
 	"nmrih"
 	{
-		"Signatures"
-		{
-			"CBaseEntity::SetCollisionGroup"
-			{
-				// void (int)
-				"library" "server"
-				"windows" "\x55\x8B\xEC\x53\x8B\x5D\x08\x56\x57\x8B\xF9\x39\x9F\xE0\x01\x00\x00"
-				"linux" "@_ZN11CBaseEntity17SetCollisionGroupEi"
-			}
-		}
-
 		"Offsets"
 		{
+			"CPlayerPickupController::m_iOriginalCollisionGroup"
+			{
+				"windows"	"9224"
+				"linux"	"9224"
+			}
+
 			"CGameTrace::m_pEnt"
 			{
 				// CBaseEntity *
@@ -24,14 +19,14 @@
 
 			"CNMRiH_BarricadePoint::pBoard"
 			{
-				"windows" "1164"
-				"linux" "1184"
+				"windows" "1224"
+				"linux" "1244" // UNTESTED
 			}
 
 			"CNMRiH_PlayerSpawn::m_bEnabled"
 			{
-				"windows" "829"
-				"linux" "849"
+				"windows" "889" 
+				"linux" "909"
 			}
 
 			// ================================================================
@@ -47,29 +42,29 @@
 			"CNMRiH_ObjectiveGameRules::FPlayerCanRespawn"
 			{
 				// bool (CBasePlayer *)
-				"windows" "73"
-				"linux" "74"
+				"windows" "74"
+				"linux" "75"
 			}
 
 			"CGameRules::GetPlayerSpawnSpot"
 			{
 				// CBaseEntity * (CBasePlayer *)
-				"windows" "75"
-				"linux" "76"
+				"windows" "76"
+				"linux" "77"
 			}
 
 			"CGameRules::IsSpawnPointValid"
 			{
 				// bool (CBaseEntity *, CBasePlayer *)
-				"windows" "76"
-				"linux" "77"
+				"windows" "77"
+				"linux" "78"
 			}
 
 			"CNMRiH_GameRules::AreTokensGivenFromKills"
 			{
 				// bool ()
-				"windows" "173"
-				"linux" "174"
+				"windows" "173" // untested
+				"linux" "175"
 			}
 
 			// ================================================================
@@ -78,8 +73,8 @@
 			"CBaseEntity::SetParent"
 			{
 				// void (CBaseEntity *, int)
-				"windows" "34"
-				"linux" "35"
+				"windows" "36"
+				"linux" "37"
 			}
 
 			// ================================================================
@@ -88,14 +83,14 @@
 			"CNMRiH_BaseMedicalItem::ApplyMedicalItem_Internal"
 			{
 				// void ()
-				"windows" "433" 
-				"linux" "434" 
+				"windows" "439" 
+				"linux" "440" 
 			}
 
 			"CNMRiH_BaseMedicalItem::ShouldUseMedicalItem"
 			{
-				"windows" "434" 
-				"linux" "435" 
+				"windows" "440" 
+				"linux" "441" 
 			}
 
 			// ================================================================
@@ -104,8 +99,8 @@
 			"CBaseGrenade::Detonate" 
 			{
 				// void ()
-				"windows" "219"
-				"linux" "220"
+				"windows" "222"
+				"linux" "223"
 			}
 
 			// ================================================================
@@ -114,29 +109,29 @@
 			"CNMRiH_BaseZombie::m_bCrawler"
 			{
 				// bool
-				"windows" "3756"
-				"linux" "3772"
+				"windows" "3816"
+				"linux" "3832" // UNTESTED
 			}
 
 			"CNMRiH_BaseZombie::bHasArmor" 
 			{
 				// bool
-				"windows" "3757"
-				"linux" "3773" 
+				"windows" "3817"
+				"linux" "3833" 
 			}
 
 			"CNMRiH_BaseZombie::GetShoved" 
 			{
 				// void (CBaseEntity *)
-				"windows" "303"
-				"linux" "304"
+				"windows" "308"
+				"linux" "309"
 			}
 
 			"CBaseCombatCharacter::NPC_TranslateActivity" 
 			{
 				// Activity (Activity)
-				"windows" "259"
-				"linux" "260"
+				"windows" "264"
+				"linux" "265"
 			}
 
 			// ================================================================
@@ -145,43 +140,43 @@
 			"CBaseCombatWeapon::HasAnyAmmo" 
 			{
 				// bool ()
-				"windows" "244"
-				"linux" "245"
+				"windows" "247"
+				"linux" "248"
 			}
 
 			"CBaseCombatWeapon::GetWeight" 
 			{
 				// int () const
-				"windows" "318"
-				"linux" "319"
+				"windows" "321"
+				"linux" "322"
 			}
 
 			"CBaseCombatWeapon::AllowsAutoSwitchTo" 
 			{
 				// bool () const
-				"windows" "319"
-				"linux" "320"
+				"windows" "322"
+				"linux" "323"
 			}
 
 			"CNMRiH_WeaponBase::HitEffects"
 			{
 				// void (CGameTrace &)
-				"windows" "402" 
-				"linux" "403" 
+				"windows" "403" 
+				"linux" "404" 
 			}
 
 			"CNMRiH_WeaponBase::ToggleIronsights"
 			{
 				// void ()
-				"windows" "404" 
-				"linux" "405" 
+				"windows" "405" 
+				"linux" "406" 
 			}
 
 			"CNMRiH_WeaponBase::DoShove" 
 			{
 				// void (void)
-				"windows" "418"
-				"linux" "419"
+				"windows" "419"
+				"linux" "420"
 			}
 		}
 	}
