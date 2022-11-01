@@ -34,7 +34,7 @@
 #pragma semicolon 1
 #pragma newdecls required
 
-#define QOL_VERSION "2.1.5"
+#define QOL_VERSION "2.1.7"
 #define QOL_TAG "qol"
 #define QOL_LOG_PREFIX "[QOL]"
 

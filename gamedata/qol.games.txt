@@ -7,7 +7,7 @@
 			"CPlayerPickupController::m_iOriginalCollisionGroup"
 			{
 				"windows"	"9224"
-				"linux"	"9224"
+				"linux"	"9248"
 			}
 
 			"CGameTrace::m_pEnt"
@@ -20,13 +20,13 @@
 			"CNMRiH_BarricadePoint::pBoard"
 			{
 				"windows" "1224"
-				"linux" "1244" // UNTESTED
+				"linux" "1248"
 			}
 
 			"CNMRiH_PlayerSpawn::m_bEnabled"
 			{
 				"windows" "889" 
-				"linux" "909"
+				"linux" "913"
 			}
 
 			// ================================================================
@@ -63,7 +63,7 @@
 			"CNMRiH_GameRules::AreTokensGivenFromKills"
 			{
 				// bool ()
-				"windows" "173" // untested
+				"windows" "173" // UNTESTED
 				"linux" "175"
 			}
 
@@ -110,14 +110,14 @@
 			{
 				// bool
 				"windows" "3816"
-				"linux" "3832" // UNTESTED
+				"linux" "3836"
 			}
 
 			"CNMRiH_BaseZombie::bHasArmor" 
 			{
 				// bool
 				"windows" "3817"
-				"linux" "3833" 
+				"linux" "3837" 
 			}
 
 			"CNMRiH_BaseZombie::GetShoved" 
